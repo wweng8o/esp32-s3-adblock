@@ -1,0 +1,10 @@
+# Dual-OTA layout for 8 MB flash (ESP32-S3 N8R8).
+# Firmware is ~1 MB (TLS + HTTP + OTA), so each app slot is 1.5625 MB
+# (~640 KB headroom). The rest is a ~5 MB LittleFS partition, enough for
+# ~1,000,000 hashed domains at 5 bytes each.
+# Name,   Type, SubType, Offset,    Size
+nvs,      data, nvs,     0x9000,    0x5000
+otadata,  data, ota,     0xe000,    0x2000
+app0,     app,  ota_0,   0x10000,   0x190000
+app1,     app,  ota_1,   0x1a0000,  0x190000
+spiffs,   data, spiffs,  0x330000,  0x4D0000

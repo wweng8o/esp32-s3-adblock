@@ -1,0 +1,45 @@
+name: blocklist
+
+# Rebuilds the default blocklist weekly and publishes it at a stable URL:
+#   https://github.com/M-Abozaid/esp32-c3-adblock/releases/download/blocklist/blocklist.bin
+# Point a device's "Remote auto-update" at that URL and it stays current on its own.
+on:
+  schedule:
+    - cron: "17 4 * * 1"   # Mondays 04:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build default blocklist (fails if any source is unreachable)
+        run: python3 tools/build_blocklist.py blocklist.bin 2>&1 | tee build.log
+      - name: Sanity checks
+        run: |
+          size=$(stat -c%s blocklist.bin)
+          echo "size=$size bytes"
+          test $((size % 5)) -eq 0                  # whole 40-bit entries
+          test "$size" -gt 250000                   # >50k entries, catches a silently shrunk list
+          test "$size" -lt 1300000                  # fits the dual-OTA filesystem partition
+      - name: Publish to the 'blocklist' release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          entries=$(( $(stat -c%s blocklist.bin) / 5 ))
+          notes="Auto-built $(date -u +%F) — ${entries} entries (StevenBlack base + Hagezi Light).
+
+          Set this as the device's Remote auto-update URL:
+          https://github.com/${{ github.repository }}/releases/download/blocklist/blocklist.bin"
+          if gh release view blocklist >/dev/null 2>&1; then
+            gh release edit blocklist --notes "$notes"
+          else
+            gh release create blocklist --title "Weekly blocklist" --notes "$notes" --latest=false
+          fi
+          gh release upload blocklist blocklist.bin --clobber

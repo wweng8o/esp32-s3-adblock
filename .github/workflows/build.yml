@@ -1,0 +1,40 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [s3, c3, esp32dev]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+      - run: pip install -U platformio
+      - name: Placeholder secrets (real ones are gitignored; the firmware falls back to the setup portal)
+        run: cp src/secrets.example.h src/secrets.h
+      - run: pio run -e ${{ matrix.env }}
+
+  blocklist-tool:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Parse hosts, plain and AdGuard-style input
+        run: |
+          printf '||ads.example.com^\n@@||ok.example.org^\n||ok.example.org^\n0.0.0.0 hosts.example.com\nplain.example.com\n/^regex$/\n' > t.txt
+          python3 tools/build_blocklist.py t.bin t.txt
+          test "$(stat -c%s t.bin)" -eq 15   # 3 entries x 5 bytes

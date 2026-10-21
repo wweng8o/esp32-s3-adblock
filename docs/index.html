@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>esp32-s3-adblock — 2.3M domains, 12 MB of flash, no server</title>
+<meta name="description" content="A Pi-hole-style DNS ad-blocker for the ESP32-S3: 2.3 million blocked domains stored as sorted 40-bit hashes in flash.">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { font: 16px/1.65 system-ui, -apple-system, sans-serif; margin: 0; background: #0d1117; color: #c9d1d9; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 48px 20px 80px; }
+  h1 { font-size: 32px; margin: 0 0 8px; letter-spacing: -0.5px; }
+  h1 .g { color: #3fb950; }
+  h2 { font-size: 19px; margin: 34px 0 10px; }
+  .sub { color: #8b949e; margin: 0 0 26px; font-size: 17px; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px 22px; margin: 16px 0; }
+  .stats { display: flex; flex-wrap: wrap; gap: 10px; margin: 22px 0; }
+  .stat { flex: 1; min-width: 130px; background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 14px 16px; }
+  .stat b { display: block; font-size: 24px; color: #3fb950; }
+  .stat span { color: #8b949e; font-size: 13px; }
+  ol, ul { padding-left: 22px; } li { margin: 6px 0; }
+  code { background: #21262d; padding: 2px 6px; border-radius: 5px; font-size: 14px; }
+  pre { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 14px 16px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  a { color: #58a6ff; }
+  .btn { display: inline-block; font: 600 16px system-ui; padding: 12px 22px; border-radius: 8px; background: #3fb950; color: #000; text-decoration: none; margin: 6px 8px 6px 0; }
+  .btn.alt { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
+  .note { color: #8b949e; font-size: 14px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #21262d; }
+  th { color: #8b949e; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🛡️ <span class="g">esp32-s3-adblock</span></h1>
+  <p class="sub">A Pi-hole-style DNS ad-blocker that runs on an ESP32-S3 and blocks
+    <b>2.3 million domains</b> from 11.5 MB of flash — no server, no SD card, no domain
+    strings in RAM.</p>
+
+  <div class="stats">
+    <div class="stat"><b>2.3M</b><span>blocked domains</span></div>
+    <div class="stat"><b>11.5 MB</b><span>flash, not RAM</span></div>
+    <div class="stat"><b>~10 ms</b><span>per blocked lookup</span></div>
+    <div class="stat"><b>113 KB</b><span>firmware RAM</span></div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0">How it works</h2>
+    <p>Domains are stored as sorted <b>40-bit FNV-1a hashes</b>. A query is hashed (plus
+      each parent suffix) and binary-searched. A hit is answered <code>0.0.0.0</code>;
+      anything else is forwarded to your resolver asynchronously, so one slow lookup never
+      stalls the rest of the network.</p>
+    <pre><code>query in ──▶ extract domain ──▶ FNV-1a hash (+ parent suffixes)
+         ──▶ binary search the sorted hash table
+              ├─ hit  ──▶ 0.0.0.0        (sinkholed)
+              └─ miss ──▶ upstream (async), relay reply</code></pre>
+    <p class="note">On lists that fit in PSRAM (up to ~1.5M domains) the table is mirrored
+      into PSRAM at boot, turning lookups into in-RAM binary searches.</p>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0">Flash it</h2>
+    <ol>
+      <li>Grab <code>firmware.bin</code> and <code>littlefs.bin</code> from the
+        <a href="https://github.com/wweng8o/esp32-s3-adblock/releases">releases page</a>.</li>
+      <li>Flash both with <code>esptool</code> or PlatformIO (see the README for exact
+        offsets).</li>
+      <li>Join the <code>C3-AdBlock-XXXX</code> access point, pick your WiFi, done.</li>
+      <li>Point your router's DNS at the board and open
+        <code>http://c3adblock.local</code>.</li>
+    </ol>
+    <p style="margin-bottom:0">
+      <a class="btn" href="https://github.com/wweng8o/esp32-s3-adblock">Source on GitHub</a>
+      <a class="btn alt" href="https://github.com/wweng8o/esp32-s3-adblock#quick-start">Build from source</a>
+    </p>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0">Board support</h2>
+    <table>
+      <tr><th>Board</th><th>Flash</th><th>PSRAM</th><th>Capacity</th></tr>
+      <tr><td>ESP32-S3 N16R8 <em>(default)</em></td><td>16 MB</td><td>8 MB octal</td><td>~2.6M domains</td></tr>
+      <tr><td>ESP32-S3 N8R8</td><td>8 MB</td><td>8 MB octal</td><td>~1M domains</td></tr>
+      <tr><td>ESP32-C3 SuperMini</td><td>4 MB</td><td>none</td><td>~250k domains</td></tr>
+      <tr><td>Classic ESP32</td><td>4 MB</td><td>none</td><td>~250k domains</td></tr>
+    </table>
+  </div>
+
+  <p class="note">MIT licensed. Based on
+    <a href="https://github.com/M-Abozaid/esp32-c3-adblock">M-Abozaid/esp32-c3-adblock</a>,
+    which in turn credits <a href="https://github.com/s60sc/ESP32_AdBlocker">s60sc/ESP32_AdBlocker</a>
+    for the "answer 0.0.0.0" idea.</p>
+</div>
+</body>
+</html>
