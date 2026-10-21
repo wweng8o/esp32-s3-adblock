@@ -21,7 +21,9 @@ jobs:
         with:
           path: ~/.platformio
           key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
-      - run: pip install -U platformio
+      # intelhex is no longer pulled in by esptool on newer PlatformIO cores;
+      # without it `pio run` fails while generating bootloader.bin.
+      - run: pip install -U platformio intelhex
       - name: Placeholder secrets (real ones are gitignored; the firmware falls back to the setup portal)
         run: cp src/secrets.example.h src/secrets.h
       - run: pio run -e ${{ matrix.env }}
