@@ -809,13 +809,13 @@ static bool connectWiFi() {
 // power-on just enters the ROM download mode, so the old boot-time check was
 // unreachable on most boards.)
 #if defined(CONFIG_IDF_TARGET_ESP32C3)
-static const int BOOT_PIN = 9;
+static const int WIFI_RESET_PIN = 9;
 #else
-static const int BOOT_PIN = 0;
+static const int WIFI_RESET_PIN = 0;
 #endif
 static void pollBootButton() {
   static uint32_t downSince = 0;
-  if (digitalRead(BOOT_PIN) == HIGH) { downSince = 0; return; }
+  if (digitalRead(WIFI_RESET_PIN) == HIGH) { downSince = 0; return; }
   const uint32_t now = millis();
   if (downSince == 0) { downSince = now ? now : 1; return; }
   if (now - downSince >= 3000) {
@@ -909,7 +909,7 @@ void setup() {
   loadCustom(); loadBanned(); loadUpdateCfg(); loadDnsCfg();
   Serial.printf("custom: %d, banned: %d\n", numCustom, numBanned);
 
-  pinMode(BOOT_PIN, INPUT_PULLUP);   // hold 3 s while running to reset WiFi
+  pinMode(WIFI_RESET_PIN, INPUT_PULLUP);   // hold 3 s while running to reset WiFi
 
   if (!connectWiFi()) startConfigPortal();   // portal blocks + reboots on save; returns only when connected
   Serial.printf("WiFi up: %s\n", WiFi.localIP().toString().c_str());
