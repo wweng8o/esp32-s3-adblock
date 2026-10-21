@@ -8,7 +8,7 @@ This fork keeps **only the ESP32-S3 (N16R8) target** and uses the 16 MB of flash
 **2.3 million domains**. Everything else — the hash-in-flash concept, the dashboard, the
 captive-portal setup, the OTA design — comes from the upstream project.
 
-[日本語 README](README_JP.md) · [Changelog](CHANGELOG.md) · [Upstream demo video](https://youtube.com/shorts/RaxszOUMi8E?feature=share)
+[Changelog](CHANGELOG.md) · [Upstream demo video](https://youtube.com/shorts/RaxszOUMi8E?feature=share)
 
 > **Based on [M-Abozaid/esp32-c3-adblock](https://github.com/M-Abozaid/esp32-c3-adblock):**
 > *"Pi-hole-class DNS ad-blocker on a $2 ESP32-C3 (no PSRAM): 537k domains as 40-bit
