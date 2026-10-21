@@ -64,6 +64,7 @@ jobs:
       - name: Attach firmware to the release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}   # no checkout in this job: tell gh the repo
           TAG: ${{ github.ref_name }}
         run: |
           if ! gh release view "$TAG" >/dev/null 2>&1; then
