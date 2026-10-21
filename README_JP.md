@@ -1,151 +1,206 @@
-> ℹ️ 英語版 [README](README.md) が最新です。この日本語版は一部の新機能を反映していない場合があります。変更点は [CHANGELOG](CHANGELOG.md) を参照してください。
-
 # esp32-s3-adblock
 
-[English README](README.md) · [Changelog](CHANGELOG.md)
+[M-Abozaid/esp32-c3-adblock](https://github.com/M-Abozaid/esp32-c3-adblock) の **ESP32-S3 向けフォーク**です。
+Pi-hole 風の DNS 広告ブロッカーで、ブロックリストをドメイン文字列ではなく**ソート済みの 40 ビット
+FNV-1a ハッシュ**としてフラッシュに保存します。
 
-**Pi-hole風のDNS広告ブロッカー**です。ESP32-S3では**230万ドメイン**を11.5 MBのフラッシュに収めてブロックできます。PSRAMなしのESP32-C3（約2ドル）でも動作します。
-このフォークでは、ESP32-S3（16 MB、標準）とESP32-C3 / ESP32 DevKit V1 のビルド環境を提供しています。
+このフォークは **ESP32-S3（N16R8）専用**に簡略化し、16 MB のフラッシュを使って
+**230 万ドメイン**をブロックします。ハッシュ方式・ダッシュボード・キャプティブポータル・OTA の
+設計はすべて上流プロジェクトによるものです。
 
-要点は、ブロックリスト全体をRAMに置く必要はないことです。ドメインを**ソート済みの40ビットハッシュ**としてフラッシュに保存し、二分探索で照合します。140,000件を超えるドメインを約0.7 MBのフラッシュに収め、約50 KBのRAMだけで照合できます。
+[English README](README.md) · [Changelog](CHANGELOG.md) · [上流のデモ動画](https://youtube.com/shorts/RaxszOUMi8E?feature=share)
+
+> **ベースプロジェクト: [M-Abozaid/esp32-c3-adblock](https://github.com/M-Abozaid/esp32-c3-adblock)**
+> *"2ドルの ESP32-C3（PSRAM なし）で Pi-hole 級の DNS 広告ブロッカー: 53.7 万ドメインを
+> 40 ビット FNV-1a ハッシュとして保持し、フラッシュを二分探索。UDP DNS シンクホール + Web ダッシュボード。"*
+> 変更点は [Attribution](#attribution) を参照してください。
 
 ```
-DNSクエリ受信 ──▶ ドメインを抽出 ──▶ FNV-1aハッシュを計算（親サフィックスも対象）
-                                  ──▶ フラッシュ内のハッシュ表を二分探索
-                                       ├─ 一致 ──▶ 0.0.0.0 を応答（シンクホール）
-                                       └─ 不一致 ──▶ 上流DNSへ転送し、応答を中継
+DNSクエリ ──▶ ドメイン抽出 ──▶ FNV-1a ハッシュ（親サフィックスも）
+                        ──▶ ソート済み 40 ビットハッシュ表を検索
+                             ├─ 一致 ──▶ 0.0.0.0 を応答（シンクホール）
+                             └─ 不一致 ─▶ 上流DNSへ非同期転送して中継
 ```
 
-## この方式の特徴
+## 方式の要点
 
-一般的なESP32用DNSシンクホールは、ブロックリストをドメインの*文字列*としてRAMへ読み込むため、PSRAMが必要になります。このプロジェクトでは、代わりに固定長の**5バイト（40ビット）ハッシュ**をフラッシュに保存します。
+上流のアイデアをそのまま使っています。ドメイン文字列はデバイスに保存しません。FNV-1a で
+ハッシュ化し 40 ビットに切り詰め、ソートしてフラッシュに固定長で並べます。クエリはハッシュ化して
+二分探索します。
 
-| | 文字列をRAMに保持する方式 | 本プロジェクト（ハッシュをフラッシュに保持） |
+| | 文字列を RAM に保持（一般的な実装） | 本プロジェクト |
 |---|---|---|
-| ハードウェア | ESP32 + PSRAM（約8ドル） | ESP32-C3、PSRAM不要（約2ドル） |
-| 141,000ドメイン | 約2.5 MBのRAM | **0.67 MBのフラッシュ** |
-| RAM使用量 | ほぼ全量 | **約50 KB** |
-| 照合 | 文字列比較 | 約18回のフラッシュ読み出し（Wi-Fi往復時間を含め約10 ms） |
-| ハッシュ衝突 | 該当なし | 141,000件で0件、537,000件で1件 |
+| 230 万ドメイン | 約 40 MB の RAM（不可能） | **11.5 MB のフラッシュ** |
+| RAM 使用量 | ほぼ全量 | **約 113 KB** |
+| 照合 | 文字列比較 | フラッシュ／PSRAM の二分探索 |
+| 衝突（230 万件） | — | **1 件**（無関係な 1 ドメインが過剰ブロック） |
 
-**なぜ40ビットなのか。** このフラッシュ容量では40ビットが最適なバランスです。衝突数は誕生日問題に従い、141,000件ではおよそ0件、537,000件ではおよそ1件です。この場合、運悪く別の1ドメインもブロックされます。32ビットにするとフラッシュ使用量を20%削減できますが、250,000件で約7件の衝突が発生します。一方、64ビットでは不要な問題を解決するために、1件あたり3バイト余計に使います。
-
-この手法は、より大きなチップでも利用できます。16 MBフラッシュのESP32-S3なら、ハッシュは約260万ドメインを保存できます。これは8 MB PSRAMへ文字列で保存する場合の約46万6,000件を上回ります。ハッシュをフラッシュに置く方式は、PSRAM上に文字列を置く方式より効率的です。
-
-## 上流DNSの選択
-
-許可されたドメインは次の順で上流DNSへ転送されます。
-
-1. ダッシュボードの *Upstream DNS* で固定したリゾルバ（`/dns.cfg` に保存）
-2. DHCPで配布されたDNS（通常はルーター）
-3. 内蔵の既定値 `9.9.9.9`
-
-応答が3回連続で途絶えると、次の候補へ自動的に切り替わります。公共DNSが遮断されているネットワーク（多くのモバイル回線や社内Wi-Fiは `9.9.9.9`/`1.1.1.1` を落とします）では、この切り替えがないと「ブロックは効くが通常のサイトが全て引けない」状態になります。
+ハッシュのみを保存するため、デバイス上のリストは読めません。テキスト版が必要な場合は
+`--domains-out` を付けてビルドしてください。
 
 ## ハードウェア
 
-- **ESP32-S3**（標準環境`s3`、対象構成は**N16R8**: 16 MBフラッシュ + 8 MBオクタルPSRAM）。16 MBのパーティション構成ではLittleFSが12.5 MBになり、デュアルOTAと共存しつつ**約260万ドメイン**を保存できます。PSRAMに収まる規模（約150万件まで）は起動時にミラーされ、RAM内の二分探索になります。それを超える場合はフラッシュ索引による検索（約10 ms）になります。
-  - **N8R8 / N8R2**（8 MBフラッシュ）: `platformio.ini`で`board_build.partitions = partitions_s3.csv`と`board_upload.flash_size = 8MB`に戻してください。2 MBクアッドPSRAMの場合は`board_build.arduino.memory_type = qio_qspi`も指定します。
-- PSRAMなしで4 MBフラッシュを持つ任意の**ESP32-C3**ボード（C3 SuperMiniで動作確認済み）
-- 4 MBフラッシュの**ESP32 DevKit V1 / WROOM-32**も`esp32dev`環境でビルドできます。
-- 安定したUSB電源を使用してください。スマートフォン用充電器やルーターのUSBポートが使えます。安価または緩いUSB-C→USB-A変換アダプターでは、Wi-Fi送信時に電圧低下が発生することがあります。
-- USB-A→USB-C変換アダプターを使えば、多くのルーター背面にある空きUSBポートへC3ボードを直接接続できます。追加の電源やケースは不要です。
+**ESP32-S3 N16R8 専用**（16 MB フラッシュ + 8 MB オクタル PSRAM）。
 
-### ケース
+| | |
+|---|---|
+| フラッシュ | 16 MB（うち 12.5 MB がブロックリスト用ファイルシステム） |
+| PSRAM | 8 MB オクタル。収まる場合は表を起動時にミラー |
+| ブロックリスト容量 | 約 260 万ドメイン |
+| ファームウェア | 約 1.0 MB（3.x コアでは最大約 1.35 MB） |
 
-C3 SuperMini用の3Dプリントケースは[`hardware/esp32-c3-supermini-enclosure.stl`](hardware/esp32-c3-supermini-enclosure.stl)です。
+ミラーには 1 ドメインあたり 5 バイト必要なので、**約 150 万件**までが PSRAM に載ります。
+`max`（230 万件・11.5 MB）は 8 MB を超えるためフラッシュ索引経路（1 回約 10 ms）で動作します。
 
-プリント時の注意点:
+**コンソール接続:** `Serial` は UART0 のままです（CH340/CP210x の USB-シリアル変換向け）。
+S3 のネイティブ USB ポートを使う基板では `build_flags` に
+`-DARDUINO_USB_MODE=1 -DARDUINO_USB_CDC_ON_BOOT=1` を追加してください。
 
-- サポートは不要です。積層高0.2 mm、インフィル約15%で十分です。
-- **アンテナ側を塞がないでください。** C3のPCBアンテナはUSB-Cポートと反対側の短辺にあるジグザグのパターンです。固い樹脂で覆ったり、近くに金属を置いたりすると、受信信号強度が低下します。
-- 通気口を塞がないでください。ボードはアイドル時でも約45～55℃になります。
-
-## ビルドと書き込み（PlatformIO）
-
-初回のみUSBで書き込めば、その後は**ファームウェアとブロックリストの両方をWi-Fi経由で更新**できます。
+## ビルドと書き込み
 
 ```bash
-# 1. Wi-Fi認証情報を設定します。
-#    secrets.hは.gitignoreで除外されるため、ローカルにのみ保存されます。
+# 1. secrets.h を作成して編集（WIFI_* は任意、WEB_PASS / OTA_PASS は必須）
 cp src/secrets.example.h src/secrets.h
-#    src/secrets.hのWIFI_SSIDとWIFI_PASSを編集します。
 
-# 2. ブロックリストのハッシュ表を作成します。
-#    既定のプリセットは light（StevenBlack base + Hagezi Light、約11.5万件）。
-#    WhatsApp/SNSは影響を受けません。
-#    16 MBのESP32-S3なら --preset max で約230万件になります:
-#      python3 tools/build_blocklist.py data/blocklist.bin --preset max
+# 2. ハッシュ表を生成（既定プリセットは max = 約230万件 / 11.5 MB）
 python3 tools/build_blocklist.py data/blocklist.bin
 
-# 3. ファームウェアとブロックリスト用ファイルシステムを書き込みます。
+# 3. 初回のみ USB でファームウェアとファイルシステムを書き込み
 pio run -t upload
-pio run -t uploadfs
+pio run -t uploadfs        # 13 MB のイメージでシリアル約4分
 
-# 4. 起動ログからIPアドレスを確認し、ダッシュボードを開きます。
-pio device monitor          # -> http://c3adblock.local
+# 4. 起動ログを確認
+pio device monitor         # -> http://s3adblock.local
 ```
 
-`platformio.ini`の標準環境は`s3`（ESP32-S3）です。`default_envs = s3`なので、`-e`を省略するとS3向けにビルドされます。ESP32-C3は`-e c3`を追加してください。
+2 回目以降はファームウェアもブロックリストも Wi-Fi 経由で更新できます。
 
-```bash
-pio run -e c3 -t upload
-pio run -e c3 -t uploadfs
-pio device monitor -e c3
-```
+> ネットワークが `raw.githubusercontent.com` に到達できない場合（中国本土など）は、
+> ミラー経由でプリセットを取得できます:
+> ```bash
+> GITHUB_MIRROR=https://ghproxy.net/ python3 tools/build_blocklist.py data/blocklist.bin --preset max
+> ```
 
-## OTA更新（USB不要）
+### プリセット
 
-`http://c3adblock.local` のダッシュボードから操作できます。
+| preset | 件数 | サイズ | 内容 |
+|---|---|---|---|
+| `light` | 約 11.5 万 | 0.55 MB | 広告・トラッカー・マルウェア。SNS/メッセージは影響なし |
+| `balanced` | 約 36 万 | 1.8 MB | SNS/アダルト/ギャンブル + OISD big。PSRAM ミラー可 |
+| `max`（既定） | 約 230 万 | 11.5 MB | Hagezi **TIF**（フィッシング・詐欺・C2）を追加 |
 
-- **ブロックリスト**: 新しく作成した`blocklist.bin`を*Blocklist → Upload*からアップロードできます。または、*Remote auto-update*にURLを設定すると、デバイスが定期的に作成済みの`blocklist.bin`を取得します。たとえばGitHubリリースのアセットを指定すれば、一度更新するだけで全デバイスが取得できます。
-- **ファームウェア**: *Firmware → OTA update*から`.pio/build/<environment>/firmware.bin`をアップロードできます。デバイスは内容を検証してから、新しいイメージで再起動します。CLIからWi-Fi経由で書き込むこともできます。
+## Wi-Fi 設定
 
+接続できない場合（または `secrets.h` が未設定の場合）、オープン AP
+**`S3-AdBlock-XXXX`** とキャプティブポータルが起動します。スマートフォンで接続し、ネットワークを
+選んでパスワードを入力してください。
+
+後から別のネットワークへ移すには、ダッシュボードの **Forget WiFi** を押すか、
+**起動中に BOOT（GPIO0）を 3 秒以上押し続けます**。
+
+## ダッシュボードと HTTP API
+
+`http://s3adblock.local` で、クライアント別のブロック/許可数、システム情報、一時停止、
+クライアント禁止、カスタムドメイン、ブロックリストのアップロード、自動更新、ファームウェア OTA を
+操作できます。読み取り専用エンドポイントは認証不要、状態を変更するものは **Basic 認証** と
+ヘッダー `X-Requested-With: s3-adblock`（CSRF 対策）の両方が必要です。
+
+| エンドポイント | 認証 | 用途 |
+|---|---|---|
+| `GET /` | – | ダッシュボード |
+| `GET /stats.json` | – | 統計、クライアント、カスタムドメイン、使用中の上流 |
+| `GET /ban?ip=` | 要 | クライアント禁止の切り替え |
+| `GET /addblock?d=` / `unblock?d=` | 要 | カスタムブロックドメイン |
+| `GET /pause?s=` / `resume` | 要 | 指定秒数だけブロックを停止 |
+| `GET /setdns?ip=` | 要 | 上流 DNS を固定（空で自動） |
+| `GET /setupdate?u=&h=` / `fetchnow` | 要 | リモートブロックリストのスケジュール |
+| `POST /upload` | 要 | ブロックリストのアップロード |
+| `POST /update` | 要 | ファームウェア OTA |
+| `GET /forgetwifi` | 要 | Wi-Fi 設定を消去してポータルへ |
+
+### 上流 DNS の選択
+
+許可されたドメインは次の順に転送されます。
+
+1. `/setdns` で固定したリゾルバ（`/dns.cfg` に保存）
+2. DHCP で配布された DNS（通常はルーター）
+3. 内蔵の既定値 `9.9.9.9`
+
+応答が 3 回連続で途絶えると次の候補へ切り替わります。公共 DNS が遮断されているネットワークでは、
+この切り替えがないと「ブロックは効くが通常のサイトが引けない」状態になります。
+
+## OTA 更新
+
+- **ブロックリスト** — ダッシュボードの *Blocklist → Upload*、または *Remote auto-update* に
+  URL を設定して定期取得。差し替え中も（容量に余裕があれば）旧リストでブロックを継続し、
+  不完全なダウンロードはロールバックされます。
+- **ファームウェア** — *Firmware → OTA update* に `.pio/build/s3/firmware.bin` をアップロード、
+  または:
   ```bash
   export OTA_PASS='<secrets.h の OTA_PASS>'
-  pio run -e s3-ota -t upload --upload-port c3adblock.local
+  pio run -e s3-ota -t upload --upload-port s3adblock.local
   ```
 
-**16 MBフラッシュ（ESP32-S3 N16R8、標準）:** 1.5625 MBのアプリ領域2つでOTAを維持しつつ、ブロックリストに12.8 MB（**最大約260万ドメイン**）を使えます。230万件の`max`プリセットがそのまま収まります。
+## 性能
 
-**8 MBフラッシュ:** ブロックリストは約4.8 MB（最大約100万ドメイン）。
+ESP32-S3 N16R8、230 万ドメイン（フラッシュ経路）での実測値:
 
-**4 MBフラッシュ（C3）でのトレードオフ:** ファームウェアOTAにはアプリ用領域が2つ必要です。arduino-esp32 3.xではファームウェアが約1.42 MBになるため、各アプリ領域を1.625 MBに増やし、ブロックリストは704 KB（**最大約14万ドメイン**）になります。C3では`light`プリセットを使用してください。
+| ケース | レイテンシ |
+|---|---|
+| ブロック（キャッシュ命中） | 7–12 ms |
+| ブロック（フラッシュ二分探索） | 10–47 ms |
+| 上流への転送 | 40–110 ms |
+| ファームウェア RAM 使用量 | 113 KB / 320 KB（34.6%） |
 
-## 使い方
+`light` / `balanced` のように PSRAM に収まるリストでは、起動時ミラーにより RAM 内二分探索になります。
 
-端末のDNSサーバーをデバイスのIPアドレスに設定するか、メインDNSの後ろに**セカンダリDNSリゾルバー**として追加します。以下で確認できます。
+## セキュリティ
 
-```bash
-dig @<デバイスのIPアドレス> doubleclick.net   # -> 0.0.0.0（ブロック済み）
-dig @<デバイスのIPアドレス> github.com        # -> 実際のIPアドレス（上流DNSへ転送）
-```
+- 状態変更エンドポイントは **Basic 認証**、ArduinoOTA は **`OTA_PASS`**。
+- **CSRF ヘッダー** `X-Requested-With: s3-adblock`。ブラウザーはキャッシュされた Basic 認証を
+  任意のリクエストへ自動付与するため、認証だけでは `<img src="http://s3adblock.local/forgetwifi">`
+  のような攻撃を防げません。
+- カスタムドメイン名は描画前に HTML エスケープされます（蓄積型 XSS 対策）。
+- 平文 HTTP（:80）です。Basic 認証は LAN の信頼境界であり暗号化ではありません。
+- `CHANGE_ME_*` のままの場合はシリアルとダッシュボードに警告が出ます。
 
-## 注意事項
+## トラブルシューティング
 
-- **ModemManager**（Fedora/Ubuntuの既定）は`/dev/ttyACM0`を確保し、DTR/RTSを切り替えます。これによりC3がリセットされ、シリアル通信を妨げます。次のように対処できます。
+| 症状 | 対処 |
+|---|---|
+| `ModuleNotFoundError: No module named 'intelhex'` | PlatformIO 自身の Python に `pip install intelhex` |
+| `Could not open COMx, the port is busy` | 他のモニター/シリアルアプリがポートを占有、または USB 未接続 |
+| `Failed to connect` | BOOT を押しながら RST、離してダウンロードモードへ |
+| ドメイン数が 0 | `pio run -t uploadfs` の未実行、または `data/blocklist.bin` 不在 |
+| ダッシュボードは開くがブロックされない | 端末の DNS がまだデバイスを向いていない |
+| ブロックは効くが通常サイトが引けない | 上流 DNS に到達不能 → ダッシュボードで *Upstream DNS* を設定 |
+| `s3adblock.local` が引けない | `pio device monitor` に出る IP を使用 |
+| `"psram":false` | リストが空き PSRAM より大きい（`max` では正常） |
 
-  ```bash
-  sudo systemctl stop ModemManager
-  echo 'ATTRS{idVendor}=="303a", ENV{ID_MM_DEVICE_IGNORE}="1"' | sudo tee /etc/udev/rules.d/99-esp-no-modemmanager.rules
-  sudo udevadm control --reload-rules && sudo udevadm trigger
-  ```
+## Attribution
 
-- C3のUSB-Serial-JTAGコンソールでは、ホスト接続前の起動ログが失われる場合があります。`while(!Serial)`が役に立ちます。
-- DNSクライアントはEDNSのOPTレコードを追加します。ブロック時の応答には、質問と回答だけを含める必要があります（`ANCOUNT=1`、`NSCOUNT=ARCOUNT=0`）。これを守らないと不正なDNS応答になります。
+本プロジェクトは **[M-Abozaid/esp32-c3-adblock](https://github.com/M-Abozaid/esp32-c3-adblock)**
+（*"Pi-hole-class DNS ad-blocker on a $2 ESP32-C3 (no PSRAM): 537k domains as 40-bit FNV-1a
+hashes, flash binary search. UDP DNS sinkhole + web dashboard."*、
+[デモ動画](https://youtube.com/shorts/RaxszOUMi8E?feature=share)）の**改変版**です。
+上流はさらに [s60sc/ESP32_AdBlocker](https://github.com/s60sc/ESP32_AdBlocker) の
+「ブロック対象に 0.0.0.0 を返す」アイデアをクレジットしています。
 
-## 実装済みと今後の拡張
+**このフォークでの変更点**（詳細は [CHANGELOG.md](CHANGELOG.md)）:
 
-- 実装済み: Webダッシュボード、端末ごとのブロック／許可数表示、端末の遮断、独自ドメインの追加
-- 実装済み: mDNS（`c3adblock.local`）による検出
-- 実装済み: Wi-Fi経由のファームウェア／ブロックリストOTA更新、定期的なリモートブロックリスト取得
-- 未実装: RAM上のBloom filterによる高速な事前フィルター（大半を占める非一致時のフラッシュ読み出しを省略）
-- 未実装: DHCPサーバーとして動作し、自身をDNSサーバーとして配布するプラグアンドプレイ機能
+- **ESP32-S3 専用化** — C3 / クラシック ESP32 の環境・パーティションテーブル・ケースを削除。
+  16 MB パーティション、オクタル PSRAM 用 `qio_opi`、UART コンソール、`s3-ota` 環境を追加。
+- **DNS 転送の非同期化** — 上流は 1 クエリ最大 1 秒ブロックし、全クライアントを直列化していました。
+  現在は最大 32 クエリを同時処理し、送信元・独自トランザクション ID・質問セクションのハッシュで照合します。
+- **上流リゾルバの選択と切り替え** — 固定 → DHCP → `9.9.9.9`、3 回タイムアウトで次へ。
+- **230 万ドメインのリスト**（`max`、上流既定の約 8 倍）と 12.5 MB ファイルシステム、
+  8192 バケットのフラッシュ索引。
+- **信頼性修正** — クラッシュ安全なリスト差し替え、再起動後も保持される禁止リスト、LRU
+  クライアント表、`/stats.json` のチャンク出力、Wi-Fi ウォッチドッグ、BOOT ボタン復旧。
+- ドキュメント、GitHub Pages、CI（ビルドマトリクス、リリースワークフロー）を再構成。
 
-## クレジット
-
-ブロックリストにあるドメインへ`0.0.0.0`を応答するというアイデアは、[s60sc/ESP32_AdBlocker](https://github.com/s60sc/ESP32_AdBlocker)から着想を得ています。本プロジェクトは、PSRAMなしのチップにおけるハッシュをフラッシュに保存する最適化に焦点を当てた、独立したゼロからの実装です。
+ハッシュ方式・ダッシュボード・キャプティブポータル・CSRF 対策は上流の成果です。
 
 ## ライセンス
 
-MIT。詳細は[LICENSE](LICENSE)を参照してください。
+MIT — [LICENSE](LICENSE) を参照。

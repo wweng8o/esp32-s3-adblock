@@ -1,7 +1,7 @@
 name: blocklist
 
-# Rebuilds the default blocklist weekly and publishes it at a stable URL:
-#   https://github.com/M-Abozaid/esp32-c3-adblock/releases/download/blocklist/blocklist.bin
+# Rebuilds the default ('max') blocklist weekly and publishes it at a stable URL:
+#   https://github.com/wweng8o/esp32-s3-adblock/releases/download/blocklist/blocklist.bin
 # Point a device's "Remote auto-update" at that URL and it stays current on its own.
 on:
   schedule:
@@ -26,14 +26,14 @@ jobs:
           size=$(stat -c%s blocklist.bin)
           echo "size=$size bytes"
           test $((size % 5)) -eq 0                  # whole 40-bit entries
-          test "$size" -gt 250000                   # >50k entries, catches a silently shrunk list
-          test "$size" -lt 1300000                  # fits the dual-OTA filesystem partition
+          test "$size" -gt 9000000                  # >1.8M entries, catches a silently shrunk list
+          test "$size" -lt 12000000                 # fits the 12.8 MB filesystem partition
       - name: Publish to the 'blocklist' release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           entries=$(( $(stat -c%s blocklist.bin) / 5 ))
-          notes="Auto-built $(date -u +%F) — ${entries} entries (StevenBlack base + Hagezi Light).
+          notes="Auto-built $(date -u +%F) - ${entries} entries (StevenBlack + Hagezi ultimate + OISD big + Hagezi TIF, 'max' preset).
 
           Set this as the device's Remote auto-update URL:
           https://github.com/${{ github.repository }}/releases/download/blocklist/blocklist.bin"

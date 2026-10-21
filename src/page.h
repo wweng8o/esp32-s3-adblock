@@ -1,9 +1,9 @@
 #pragma once
-// Dashboard HTML for the AdBlocker web UI (ESP32-S3 / ESP32-C3), kept in its own header so the
+// Dashboard HTML for the ESP32-S3 AdBlocker web UI, kept in its own header so the
 // Arduino IDE preprocessor doesn't choke on the inlined markup (issue #6).
 
 const char PAGE[] PROGMEM = R"HTML(<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>ESP32 AdBlock</title><style>
+<title>ESP32-S3 AdBlock</title><style>
 body{font:14px system-ui,sans-serif;margin:0;background:#0d1117;color:#c9d1d9}
 header{background:#161b22;padding:14px 18px;border-bottom:1px solid #30363d}
 h1{margin:0;font-size:18px}h1 span{color:#3fb950}.wrap{padding:16px;max-width:1000px;margin:auto}
@@ -18,7 +18,7 @@ button{background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:5
 button:hover{background:#30363d}.ban{color:#f85149}input{background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:5px;padding:6px}
 h2{font-size:14px;color:#8b949e;margin:18px 0 8px}
 </style></head><body>
-<header><h1>🛡️ ESP32 AdBlock <span id=host></span></h1></header><div class=wrap>
+<header><h1>🛡️ ESP32-S3 AdBlock <span id=host></span></h1></header><div class=wrap>
 <div id=credwarn style="display:none;background:#3b1d1d;border:1px solid #f85149;color:#ffb3ae;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px">
 ⚠️ <b>Default credentials in use.</b> WEB_PASS/OTA_PASS in <code>secrets.h</code> are still the placeholder values — anyone can read them in the public repo. Set real values and reflash.
 </div>
@@ -40,7 +40,7 @@ h2{font-size:14px;color:#8b949e;margin:18px 0 8px}
 <div style="color:#8b949e;font-size:12px;margin-bottom:18px">device pulls a prebuilt <code>blocklist.bin</code> on a schedule (e.g. a GitHub release asset). last: <span id=ustat>&mdash;</span></div>
 <h2>FIRMWARE &mdash; OTA UPDATE</h2>
 <form id=fwf style=margin-bottom:6px><input type=file id=fwb accept=.bin><button>Flash firmware</button> <span id=fwmsg style=color:#8b949e></span></form>
-<div style="color:#8b949e;font-size:12px;margin-bottom:18px">upload <code>.pio/build/s3/firmware.bin</code> (or <code>c3</code>) &mdash; device verifies it and reboots into it</div>
+<div style="color:#8b949e;font-size:12px;margin-bottom:18px">upload <code>.pio/build/s3/firmware.bin</code> &mdash; device verifies it and reboots into it</div>
 <h2>UPSTREAM DNS</h2>
 <div style=margin-bottom:6px><input id=dnsip placeholder="auto (router DNS)" size=18> <button onclick=saveDns()>Save</button> <button onclick="dnsip.value='';saveDns()">Auto</button></div>
 <div style="color:#8b949e;font-size:12px;margin-bottom:18px">resolver used for allowed domains. now: <code id=dnsnow>&mdash;</code> &mdash; leave empty to use the DNS handed out by DHCP; if the resolver stops answering the device rotates automatically.</div>
@@ -53,7 +53,7 @@ function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;',
 // can — so requiring this on every mutating request blocks drive-by CSRF even
 // though the server can't otherwise tell a forged request from a real one over
 // plain HTTP Basic Auth (browsers auto-replay cached Basic Auth cross-origin).
-const CSRF_HDRS={'X-Requested-With':'c3-adblock'}
+const CSRF_HDRS={'X-Requested-With':'s3-adblock'}
 function togglePause(){fetch(blockstate.dataset.on=='1'?'/pause?s='+pausedur.value:'/resume',{headers:CSRF_HDRS}).then(load);}
 async function load(){let s=await(await fetch('/stats.json')).json();
 host.textContent='@ '+s.ip;

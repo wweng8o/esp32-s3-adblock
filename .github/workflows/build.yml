@@ -8,10 +8,6 @@ on:
 jobs:
   firmware:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        env: [s3, c3, esp32dev]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,7 +22,7 @@ jobs:
       - run: pip install -U platformio intelhex
       - name: Placeholder secrets (real ones are gitignored; the firmware falls back to the setup portal)
         run: cp src/secrets.example.h src/secrets.h
-      - run: pio run -e ${{ matrix.env }}
+      - run: pio run -e s3
 
   blocklist-tool:
     runs-on: ubuntu-latest

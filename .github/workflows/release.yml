@@ -1,6 +1,6 @@
 name: release
 
-# Pushes a tag like v2.0.0 and gets firmware images attached to the release.
+# Push a tag like v2.0.0 and the ESP32-S3 firmware images are attached to it.
 # Blocklists are published separately by blocklist.yml.
 on:
   push:
@@ -13,16 +13,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - env: s3
-            asset: esp32s3-n16r8-firmware.bin
-          - env: c3
-            asset: esp32c3-firmware.bin
-          - env: esp32dev
-            asset: esp32-firmware.bin
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,24 +22,22 @@ jobs:
         with:
           path: ~/.platformio
           key: pio-${{ runner.os }}-release-${{ hashFiles('platformio.ini') }}
-      - name: Install PlatformIO
-        run: pip install -U platformio intelhex
-      - name: Placeholder secrets (real ones are gitignored and never built here)
+      - run: pip install -U platformio intelhex
+      - name: Placeholder secrets (real ones are gitignored)
         run: cp src/secrets.example.h src/secrets.h
-      - name: Build ${{ matrix.env }}
-        run: pio run -e ${{ matrix.env }}
+      - run: pio run -e s3
       - name: Collect artifacts
         run: |
           mkdir -p out
-          B=".pio/build/${{ matrix.env }}"
-          cp "$B/firmware.bin"     "out/${{ matrix.asset }}"
-          cp "$B/bootloader.bin"   "out/${{ matrix.env }}-bootloader.bin"
-          cp "$B/partitions.bin"   "out/${{ matrix.env }}-partitions.bin"
+          B=".pio/build/s3"
+          cp "$B/firmware.bin"   "out/esp32s3-n16r8-firmware.bin"
+          cp "$B/bootloader.bin" "out/s3-bootloader.bin"
+          cp "$B/partitions.bin" "out/s3-partitions.bin"
           cp "$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin" \
              "out/boot_app0.bin"
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.env }}
+          name: s3
           path: out/*
 
   publish:

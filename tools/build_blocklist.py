@@ -1,30 +1,21 @@
 #!/usr/bin/env python3
 """Preprocess hosts/domain blocklists into a sorted truncated-FNV-1a hash blob
-for the ESP32 ad-blocker. Hashes live in flash (ESP32-C3) or are mirrored into
-PSRAM at boot (ESP32-S3), so no domain strings are ever stored on the device.
+for the ESP32-S3 ad-blocker. Hashes live in flash and are mirrored into PSRAM at
+boot when they fit, so no domain strings are ever stored on the device.
 
-HASH_BYTES MUST match the firmware (src/main.cpp). 5 bytes (40-bit) keeps
-~0 collisions up to ~500k domains while fitting half a million in <3 MB
-(an 8 MB S3 partition holds ~1M domains).
+HASH_BYTES MUST match the firmware (src/main.cpp). 5 bytes (40-bit) gives ~0
+collisions up to ~500k domains and only ~1 at 2.3M.
 
 Usage: build_blocklist.py [out.bin] [--preset NAME] [--domains-out list.txt] [src ...]
-  src = local file or URL. With none given, uses --preset light.
+  src = local file or URL. With none given, uses --preset max.
   --domains-out also writes the final normalized domain list as plain text
   (the .bin itself only contains 40-bit hashes and cannot be reversed).
 
-Presets (size -> which board layout):
-  light     ~115k  ads/trackers/malware, social + messaging keep working
-                   4 MB C3 (704 KB FS) / any S3
-  balanced  ~360k  + social/porn/gambling + OISD big
-                   8 MB S3 (1.8 MB blob), still mirrored into PSRAM
-  max       ~2.3M  + Hagezi Threat Intelligence Feeds (malware/phishing/scam)
-                   16 MB S3 with the 12.5 MB filesystem (~11.5 MB blob); this is
-                   larger than 8 MB PSRAM, so lookups use the flash index
-
-  For the aggressive "test the limits" build (~500k, also blocks social/messaging):
-    build_blocklist.py blocklist.bin \\
-      https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling-porn-social/hosts \\
-      https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/ultimate-onlydomains.txt
+Presets (the target board has a 12.8 MB blocklist filesystem):
+  light     ~115k  0.55 MB  ads/trackers/malware, social + messaging keep working
+  balanced  ~360k  1.8 MB   + social/porn/gambling + OISD big; still PSRAM-mirrored
+  max       ~2.3M  11.5 MB  + Hagezi Threat Intelligence Feeds (malware/phishing/scam)
+                            larger than 8 MB PSRAM, so lookups use the flash index
 """
 import re
 import sys, os, math, urllib.request
@@ -35,12 +26,9 @@ FNV_OFFSET = 0xcbf29ce484222325
 FNV_PRIME  = 0x100000001b3
 U64 = (1 << 64) - 1
 
-# Daily driver that FITS alongside dual-OTA firmware slots on a 4 MB C3
-# (~140k domain budget); the 8 MB S3 has room for ~1M. Ads + trackers + malware,
-# WhatsApp/social keep working. ~100k entries / 0.5 MB
-# (Hagezi's wildcard lists drop subdomains the firmware's parent-matching already covers).
-# Want more? pro-onlydomains.txt is ~370k: it fits the 8 MB S3 with dual-OTA,
-# but on a 4 MB C3 it only fits the single-app (no-OTA) partition table.
+# `light` is the safe daily driver: ads + trackers + malware, ~115k entries / 0.55 MB,
+# WhatsApp and social keep working. Hagezi's wildcard lists drop subdomains the
+# firmware's parent-matching already covers.
 RAW = 'https://raw.githubusercontent.com/'
 
 # Networks that cannot reach raw.githubusercontent.com (many in mainland China)
@@ -67,7 +55,8 @@ PRESETS = {
         RAW + 'hagezi/dns-blocklists/main/wildcard/tif-onlydomains.txt',             # threat intelligence feeds
     ],
 }
-DEFAULT_SOURCES = PRESETS['light']
+DEFAULT_PRESET = 'max'
+DEFAULT_SOURCES = PRESETS[DEFAULT_PRESET]
 
 # ||domain^  or  @@||domain^  optionally followed by $modifiers
 ADG = re.compile(r'^(@@)?\|\|([a-z0-9._-]+)\^?(\$.*)?$', re.I)
@@ -115,7 +104,7 @@ def main():
     if len(argv) > 1:
         sources = argv[1:]
     else:
-        sources = [MIRROR + u if MIRROR else u for u in PRESETS[preset or 'light']]
+        sources = [MIRROR + u if MIRROR else u for u in PRESETS[preset or DEFAULT_PRESET]]
 
     domains, allow = set(), set()
     skipped = 0

@@ -1,9 +1,8 @@
-// DNS sinkhole + web dashboard. Primary target: ESP32-S3, where the whole
-// blocklist is mirrored into PSRAM at boot for in-RAM binary search (~us).
-// The ESP32-C3 build (no PSRAM) keeps the hashes in flash and searches them
-// through a first-level index + small lookup cache.
-// Blocklist = sorted 40-bit FNV-1a hashes.
-// Dashboard at http://c3adblock.local : per-client stats, system info,
+// ESP32-S3 DNS sinkhole + web dashboard.
+// Blocklist = sorted 40-bit FNV-1a hashes in flash. When the table fits in
+// PSRAM it is mirrored at boot and searched in RAM (~us); otherwise a
+// first-level flash index plus a small lookup cache is used (~10 ms).
+// Dashboard at http://s3adblock.local : per-client stats, system info,
 // ban clients, add custom block domains. All control state persisted to flash.
 // Upstream queries are forwarded asynchronously, so a slow resolver never
 // serializes other clients or blocks the web UI.
@@ -38,15 +37,9 @@ static const int MAX_UPSTREAMS = 4;
 static const char* BLOCKLIST_PATH = "/blocklist.bin";
 static const int HASH_BYTES = 5;
 static const uint64_t HASH_MASK = (1ULL << (HASH_BYTES * 8)) - 1;
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
 static const int INDEX_ENTRIES = 8192;   // 40 KB first-level flash index
-static const int CACHE_SIZE = 1024;      // must be power of 2 (S3: SRAM is plentiful)
+static const int CACHE_SIZE = 1024;      // must be power of 2
 static const int MAX_RANGE = 512;        // max hashes per index bucket (8192*512 -> ~4.2M domains)
-#else
-static const int INDEX_ENTRIES = 4096;   // 20 KB first-level flash index
-static const int CACHE_SIZE = 256;       // must be power of 2
-static const int MAX_RANGE = 256;        // max hashes per index bucket (~1M domains)
-#endif
 static const int MAX_PENDING = 32;            // queries in flight to the upstream resolver
 static const uint32_t UPSTREAM_TIMEOUT_MS = 1500;
 
@@ -142,10 +135,10 @@ static void buildFlashIndex() {
   }
 }
 
-// S3 targeted optimization: mirror the whole sorted hash blob into PSRAM when it fits.
-// Lookups then become pure in-memory binary searches (~us) instead of ~18 flash reads
-// (~10 ms), and the MAX_RANGE bucket clamp stops mattering. Falls back silently to the
-// flash path on boards without PSRAM (C3) or when the list exceeds free PSRAM.
+// Mirror the whole sorted hash blob into PSRAM when it fits. Lookups then become pure
+// in-memory binary searches (~us) instead of ~18 flash reads (~10 ms), and the MAX_RANGE
+// bucket clamp stops mattering. Falls back silently to the flash path when the list is
+// larger than free PSRAM (a 2.3M-domain table needs 11.5 MB, more than the 8 MB available).
 static void tryMirrorPsram() {
   if (psramHashes) { free(psramHashes); psramHashes = nullptr; }
   if (!psramFound() || !blocklist || numHashes == 0) return;
@@ -547,14 +540,14 @@ static void handleStats() {
 // and browsers auto-attach cached Basic Auth credentials to *any* request to an
 // already-authenticated origin - including one triggered by a completely
 // unrelated page the victim's browser visits later (e.g. <img src="http://
-// c3adblock.local/forgetwifi">). That's CSRF, and it defeats the LAN-attacker
+// s3adblock.local/forgetwifi">). That's CSRF, and it defeats the LAN-attacker
 // threat model entirely: the attacker doesn't need network access, just to get
 // the victim's browser to fire one request. A custom header can't be attached
 // by a plain <img>/<form> CSRF vector (only same-origin fetch() can set it, and
 // that's exactly what the dashboard's own JS does), so requiring one blocks the
 // drive-by case without needing TLS, cookies, or a token endpoint.
 static const char* CSRF_HEADER = "X-Requested-With";
-static const char* CSRF_VALUE  = "c3-adblock";
+static const char* CSRF_VALUE  = "s3-adblock";
 static bool requireAuth() {
   if (web.header(CSRF_HEADER) != CSRF_VALUE) { web.send(403, "text/plain", "missing CSRF header"); return false; }
   if (web.authenticate(WEB_USER, WEB_PASS)) return true;
@@ -804,15 +797,10 @@ static bool connectWiFi() {
   return WiFi.status() == WL_CONNECTED;
 }
 
-// BOOT button: GPIO9 on the C3, GPIO0 on classic ESP32 / ESP32-S3. Holding it
-// for 3 s while running wipes the saved WiFi credentials. (Holding it during
-// power-on just enters the ROM download mode, so the old boot-time check was
-// unreachable on most boards.)
-#if defined(CONFIG_IDF_TARGET_ESP32C3)
-static const int WIFI_RESET_PIN = 9;
-#else
+// BOOT button (GPIO0 on the ESP32-S3). Holding it for 3 s while running wipes the
+// saved WiFi credentials. (Holding it during power-on just enters the ROM download
+// mode, so a boot-time check would never fire.)
 static const int WIFI_RESET_PIN = 0;
-#endif
 static void pollBootButton() {
   static uint32_t downSince = 0;
   if (digitalRead(WIFI_RESET_PIN) == HIGH) { downSince = 0; return; }
@@ -840,9 +828,9 @@ static void checkWifi() {
 static void handlePortalRoot() {
   String html =
     "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-    "<title>C3 AdBlock setup</title>"
+    "<title>S3 AdBlock setup</title>"
     "<body style='font:16px system-ui,sans-serif;max-width:420px;margin:36px auto;padding:0 16px;background:#0d1117;color:#c9d1d9'>"
-    "<h2>&#128737; C3 AdBlock &mdash; WiFi setup</h2>"
+    "<h2>&#128737; ESP32-S3 AdBlock &mdash; WiFi setup</h2>"
     "<p style='color:#8b949e'>Pick your network and enter its password. The device restarts and joins it.</p>"
     "<form method=POST action=/wifisave>"
     "<input list=nets name=s placeholder='WiFi name' required style='width:100%;box-sizing:border-box;padding:11px;margin:6px 0;border-radius:6px;border:1px solid #30363d;background:#161b22;color:#c9d1d9'>"
@@ -858,7 +846,7 @@ static void handleWifiSave() {
   prefs.begin("wifi", false); prefs.putString("ssid", ss); prefs.putString("pass", pw); prefs.end();
   web.send(200, "text/html", "<!doctype html><meta charset=utf-8><body style='font:16px system-ui;text-align:center;margin-top:60px'>"
                              "&#9989; Saved. Restarting and joining <b>" + ss + "</b>&hellip;<br><br>"
-                             "Reconnect your phone to your normal WiFi, then find the box at <b>c3adblock.local</b>.</body>");
+                             "Reconnect your phone to your normal WiFi, then find the box at <b>s3adblock.local</b>.</body>");
   delay(900); ESP.restart();
 }
 // Never returns - blocks in the portal loop until creds are saved (then reboots).
@@ -867,7 +855,7 @@ static void startConfigPortal() {
   portalOpts = "";
   for (int i = 0; i < n && i < 15; i++) portalOpts += "<option value='" + jesc(WiFi.SSID(i)) + "'>";
   uint8_t mac[6]; WiFi.macAddress(mac);
-  char ap[24]; snprintf(ap, sizeof(ap), "C3-AdBlock-%02X%02X", mac[4], mac[5]);
+  char ap[24]; snprintf(ap, sizeof(ap), "S3-AdBlock-%02X%02X", mac[4], mac[5]);
   WiFi.mode(WIFI_AP); WiFi.softAP(ap);
   IPAddress apIP = WiFi.softAPIP();
   dnsPortal.start(53, "*", apIP);              // catch-all -> phones pop the captive portal
@@ -913,7 +901,7 @@ void setup() {
 
   if (!connectWiFi()) startConfigPortal();   // portal blocks + reboots on save; returns only when connected
   Serial.printf("WiFi up: %s\n", WiFi.localIP().toString().c_str());
-  if (MDNS.begin("c3adblock")) { MDNS.addService("http", "tcp", 80); Serial.println("dashboard: http://c3adblock.local"); }
+  if (MDNS.begin("s3adblock")) { MDNS.addService("http", "tcp", 80); Serial.println("dashboard: http://s3adblock.local"); }
 
   if (strcmp(WEB_PASS, "CHANGE_ME_WEB_PASSWORD") == 0 || strcmp(OTA_PASS, "CHANGE_ME_OTA_PASSWORD") == 0)
     Serial.println("[WARN] secrets.h still has placeholder WEB_PASS/OTA_PASS - those are public "
@@ -957,7 +945,7 @@ void setup() {
     saveUpdateCfg(); web.send(200, "text/plain", "ok");
   });
   web.begin();
-  ArduinoOTA.setHostname("c3adblock");   // pio run -t upload --upload-port c3adblock.local
+  ArduinoOTA.setHostname("s3adblock");   // pio run -e s3-ota -t upload --upload-port s3adblock.local
   ArduinoOTA.setPassword(OTA_PASS);      // network OTA was unauthenticated upstream
   ArduinoOTA.begin();
   Serial.println("DNS :53 + dashboard :80 + OTA up");

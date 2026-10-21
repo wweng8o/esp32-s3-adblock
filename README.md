@@ -1,10 +1,19 @@
 # esp32-s3-adblock
 
-A **Pi-hole-style DNS ad-blocker** on an **ESP32-S3**, designed around
-**2.3 million blocked domains in 11.5 MB of flash** — no domain strings in RAM,
-no SD card, no server.
+An **ESP32-S3 fork** of [M-Abozaid/esp32-c3-adblock](https://github.com/M-Abozaid/esp32-c3-adblock) —
+a Pi-hole-style DNS ad-blocker that stores the blocklist as sorted **40-bit FNV-1a
+hashes in flash** instead of domain strings in RAM.
 
-[日本語 README](README_JP.md) · [Changelog](CHANGELOG.md) · [Upstream project](https://github.com/M-Abozaid/esp32-c3-adblock)
+This fork keeps **only the ESP32-S3 (N16R8) target** and uses the 16 MB of flash to block
+**2.3 million domains**. Everything else — the hash-in-flash concept, the dashboard, the
+captive-portal setup, the OTA design — comes from the upstream project.
+
+[日本語 README](README_JP.md) · [Changelog](CHANGELOG.md) · [Upstream demo video](https://youtube.com/shorts/RaxszOUMi8E?feature=share)
+
+> **Based on [M-Abozaid/esp32-c3-adblock](https://github.com/M-Abozaid/esp32-c3-adblock):**
+> *"Pi-hole-class DNS ad-blocker on a $2 ESP32-C3 (no PSRAM): 537k domains as 40-bit
+> FNV-1a hashes, flash binary search. UDP DNS sinkhole + web dashboard."*
+> See [Attribution](#attribution) for what this fork changed.
 
 ```
 query in ──▶ extract domain ──▶ FNV-1a hash (+ parent suffixes)
@@ -17,7 +26,7 @@ query in ──▶ extract domain ──▶ FNV-1a hash (+ parent suffixes)
 
 ## Contents
 
-- [Why hashes instead of strings](#why-hashes-instead-of-strings)
+- [How it works](#how-it-works)
 - [Hardware](#hardware)
 - [Quick start](#quick-start)
 - [Blocklists and presets](#blocklists-and-presets)
@@ -28,72 +37,49 @@ query in ──▶ extract domain ──▶ FNV-1a hash (+ parent suffixes)
 - [Security model](#security-model)
 - [Troubleshooting](#troubleshooting)
 - [Repository layout](#repository-layout)
-- [What this fork changes](#what-this-fork-changes)
-- [Credits and license](#credits-and-license)
+- [Attribution](#attribution)
 
 ---
 
-## Why hashes instead of strings
+## How it works
 
-Most ESP32 DNS sinkholes load the blocklist (domain *strings*) into RAM, so they
-need PSRAM and are limited to a few hundred thousand entries. This project stores
-fixed **5-byte (40-bit) FNV-1a hashes** instead, sorted, and binary-searches them:
+The upstream idea, unchanged: never store domain strings on the device. Domains are hashed
+with FNV-1a, truncated to 40 bits, sorted, and written to flash as a fixed-size table. A
+query is hashed (plus each parent suffix) and binary-searched.
 
-| | strings in RAM | this project |
+| | strings in RAM (typical ESP32 sinkhole) | this project |
 |---|---|---|
 | 2.3M domains | ~40 MB of RAM (impossible) | **11.5 MB of flash** |
-| RAM used | most of it | **~110 KB** |
-| Lookup | string compare | binary search over flash (or PSRAM) |
-| Collisions at 2.3M | n/a | **1** (one domain gets over-blocked) |
+| RAM used | most of it | **~113 KB** |
+| Lookup | string compare | binary search over flash or PSRAM |
+| Collisions at 2.3M | n/a | **1** (one unrelated domain gets over-blocked) |
 
-**Why 40 bits?** It's the sweet spot for this flash budget. Collisions follow the
-birthday bound: ~0 at 141k domains, ~1 at 2.3M. Dropping to 32 bits would save 20%
-of the flash but cost ~250 collisions at 2.3M; 64 bits would waste 3 bytes per
-domain to solve a problem that does not exist here.
+**Why 40 bits?** ~0 collisions at 141k domains, ~1 at 2.3M. Going to 32 bits would save 20%
+of the flash but cost ~250 collisions; 64 bits wastes 3 bytes per domain.
 
-Because only hashes are stored, the list is not readable on the device. Use
-`--domains-out` when building to keep a plain-text copy.
+Since only hashes are stored, the list is not readable on the device — build with
+`--domains-out` if you want a plain-text copy.
 
 ## Hardware
 
-**Default target: ESP32-S3 N16R8** (16 MB flash + 8 MB octal PSRAM).
+**ESP32-S3 N16R8 only** (16 MB flash + 8 MB octal PSRAM).
 
-| Board | Flash | PSRAM | Env | Blocklist capacity |
-|---|---|---|---|---|
-| **ESP32-S3 N16R8** (default) | 16 MB | 8 MB octal | `s3` | **~2.6M domains** (12.8 MB FS) |
-| ESP32-S3 N8R8 | 8 MB | 8 MB octal | `s3` + edit | ~1M domains (4.8 MB FS) |
-| ESP32-S3 N8R2 | 8 MB | 2 MB quad | `s3` + edit | ~1M domains, mirror capped by PSRAM |
-| ESP32-C3 / SuperMini | 4 MB | none | `c3` | ~140k domains (704 KB FS) |
-| Classic ESP32 DevKit | 4 MB | none | `esp32dev` | ~140k domains |
+| | |
+|---|---|
+| Flash | 16 MB — 12.5 MB of it is the blocklist filesystem |
+| PSRAM | 8 MB octal, used to mirror the table when it fits |
+| Blocklist capacity | ~2.6M domains (11.8 MB of hashes) |
+| Firmware size | ~1.0 MB (3.x core: up to ~1.35 MB) |
 
-Switching the S3 module (**N8R8 / N8R2**) is two lines in
-[`platformio.ini`](platformio.ini):
+The PSRAM mirror needs 5 bytes per domain, so it engages up to roughly **1.5M domains**.
+The 2.3M `max` preset (11.5 MB) exceeds the 8 MB of PSRAM and therefore runs on the flash
+index — correct, just ~10 ms per lookup instead of microseconds.
 
-```ini
-board_build.partitions = partitions_s3.csv   ; instead of partitions_s3_16mb.csv
-board_upload.flash_size = 8MB
-; for 2 MB *quad* PSRAM, also:
-; board_build.arduino.memory_type = qio_qspi
-```
+**Console wiring:** `Serial` stays on **UART0**, which is what a CH340/CP210x USB-serial
+bridge needs. Boards wired to the S3's native USB port instead should add
+`-DARDUINO_USB_MODE=1 -DARDUINO_USB_CDC_ON_BOOT=1` to `build_flags`.
 
-**Console wiring matters.** The default `s3` env keeps `Serial` on **UART0**, which is
-what a CH340/CP210x USB-serial bridge needs. If your board is wired to the S3's
-native USB port instead, add `-DARDUINO_USB_MODE=1 -DARDUINO_USB_CDC_ON_BOOT=1`
-to `build_flags`.
-
-Power it from a stable USB source. Cheap USB-A→C adapters can brown out the radio
-during transmit.
-
-<details>
-<summary>Printable enclosure (C3 SuperMini)</summary>
-
-[`hardware/esp32-c3-supermini-enclosure.stl`](hardware/esp32-c3-supermini-enclosure.stl)
-
-- No supports needed; 0.2 mm layers, ~15% infill.
-- **Keep the antenna end clear** — the PCB antenna is the zig-zag trace on the edge
-  opposite the USB-C port.
-- Leave the vents open; the board idles around 45–55 °C.
-</details>
+Power the board from a stable USB source; cheap USB-A→C adapters can brown out the radio.
 
 ## Quick start
 
@@ -103,22 +89,15 @@ during transmit.
 cp src/secrets.example.h src/secrets.h
 #    edit src/secrets.h
 
-# 2. build the hash table (default preset: light, ~115k domains)
+# 2. build the hash table (default preset: max, ~2.3M domains / 11.5 MB)
 python3 tools/build_blocklist.py data/blocklist.bin
 
 # 3. one USB flash: firmware + filesystem
-pio run -t upload          # default env = s3
-pio run -t uploadfs
+pio run -t upload          # env s3 is the default
+pio run -t uploadfs        # ~4 min over serial for a 13 MB image
 
 # 4. monitor
-pio device monitor         # -> http://c3adblock.local
-```
-
-For a 16 MB board the big list looks like this:
-
-```bash
-python3 tools/build_blocklist.py data/blocklist.bin --preset max --domains-out blocklist.txt
-pio run -t uploadfs        # ~4 min over serial for a 13 MB image
+pio device monitor         # -> http://s3adblock.local
 ```
 
 After the first flash, **firmware and blocklist both update over WiFi** — no USB needed.
@@ -134,12 +113,11 @@ After the first flash, **firmware and blocklist both update over WiFi** — no U
 
 ### Prebuilt releases
 
-Pushing a `v*` tag makes CI attach `esp32s3-n16r8-firmware.bin`,
-`esp32c3-firmware.bin` and `esp32-firmware.bin` to
-[Releases](https://github.com/wweng8o/esp32-s3-adblock/releases). A weekly
-`blocklist.bin` is published there too.
+Pushing a `v*` tag makes CI attach `esp32s3-n16r8-firmware.bin`, `s3-bootloader.bin`,
+`s3-partitions.bin` and `boot_app0.bin` to [Releases](https://github.com/wweng8o/esp32-s3-adblock/releases).
+A weekly `blocklist.bin` is published there too.
 
-Flashing without PlatformIO (all files come from the same release):
+Flashing without PlatformIO:
 
 ```bash
 esptool.py --chip esp32s3 -p COM11 -b 460800 write_flash \
@@ -149,10 +127,8 @@ esptool.py --chip esp32s3 -p COM11 -b 460800 write_flash \
   0x10000 esp32s3-n16r8-firmware.bin
 ```
 
-`esp32c3-firmware.bin` uses the same layout with `c3-bootloader.bin` /
-`c3-partitions.bin` and `--chip esp32c3`. A fresh flash has no blocklist yet: add
-`data/blocklist.bin` with `pio run -t uploadfs`, upload it from the dashboard, or point
-*Remote auto-update* at the weekly release asset.
+A fresh flash has no blocklist yet: add `data/blocklist.bin` with `pio run -t uploadfs`,
+upload it from the dashboard, or point *Remote auto-update* at the weekly release asset.
 
 ## Blocklists and presets
 
@@ -162,34 +138,34 @@ esptool.py --chip esp32s3 -p COM11 -b 460800 write_flash \
 - **plain domain lists** — one domain per line
 - **AdGuard / Adblock basic rules** — `||ads.example.com^` blocks, `@@||ok.example.com^` allows
 
-A blocked domain also blocks its subdomains. Rules a DNS hash list cannot express
-(regex, wildcards, `$` modifiers, cosmetic `##` rules) are skipped and counted. An
-`@@` rule only removes that exact entry. If a source cannot be downloaded the build
-**fails** instead of silently shipping a smaller list (`--allow-missing` to override).
+A blocked domain also blocks its subdomains. Rules a DNS hash list cannot express (regex,
+wildcards, `$` modifiers, cosmetic `##` rules) are skipped and counted. An `@@` rule only
+removes that exact entry. If a source cannot be downloaded the build **fails** instead of
+silently shipping a smaller list (`--allow-missing` to override).
 
 ### Presets
 
-| preset | domains | blob | intended board |
+| preset | domains | blob | notes |
 |---|---|---|---|
-| `light` (default) | ~115k | 0.55 MB | C3 4 MB / any S3; social + messaging untouched |
-| `balanced` | ~360k | 1.8 MB | 8 MB S3; adds social/porn/gambling + OISD big, still PSRAM-mirrored |
-| `max` | ~2.3M | 11.5 MB | 16 MB S3; adds Hagezi **TIF** (malware / phishing / scam) |
+| `light` | ~115k | 0.55 MB | ads/trackers/malware; social + messaging untouched |
+| `balanced` | ~360k | 1.8 MB | adds social/porn/gambling + OISD big; still PSRAM-mirrored |
+| `max` **(default)** | ~2.3M | 11.5 MB | adds Hagezi **TIF** (malware / phishing / scam) |
 
 ```bash
-python3 tools/build_blocklist.py data/blocklist.bin --preset max --domains-out blocklist.txt
-python3 tools/build_blocklist.py data/blocklist.bin --preset light
+python3 tools/build_blocklist.py data/blocklist.bin                      # max
+python3 tools/build_blocklist.py data/blocklist.bin --preset balanced
+python3 tools/build_blocklist.py data/blocklist.bin --domains-out blocklist.txt
 python3 tools/build_blocklist.py out.bin mylist.txt https://example.com/hosts
 ```
 
-If your network cannot reach `raw.githubusercontent.com` (common in mainland China), route the
-preset downloads through a GitHub mirror — explicit source lists are used verbatim and are
-not rewritten:
+If your network cannot reach `raw.githubusercontent.com` (common in mainland China), route
+the preset downloads through a GitHub mirror — explicit source lists are used verbatim:
 
 ```bash
 GITHUB_MIRROR=https://ghproxy.net/ python3 tools/build_blocklist.py data/blocklist.bin --preset max
 ```
 
-Measured composition of the `max` preset used here:
+Measured composition of `max`:
 
 | source | purpose |
 |---|---|
@@ -200,34 +176,31 @@ Measured composition of the `max` preset used here:
 
 2,298,291 entries, 1 hash collision, 233k adblock-syntax rules skipped.
 
-> Mainstream sites were verified **not** to be in the list: WeChat, QQ, Taobao,
-> Tmall, JD, Baidu, Bilibili, Zhihu, Douyin, Xiaohongshu, Alipay, GitHub, Microsoft,
-> Apple, Google, YouTube, Netflix, Steam, Cloudflare, Aliyun.
+> Mainstream sites were verified **not** to be in the list: WeChat, QQ, Taobao, Tmall, JD,
+> Baidu, Bilibili, Zhihu, Douyin, Xiaohongshu, Alipay, GitHub, Microsoft, Apple, Google,
+> YouTube, Netflix, Steam, Cloudflare, Aliyun.
 
 ## WiFi setup
 
-If the device cannot connect (or `secrets.h` still has placeholders), it starts an
-open AP **`C3-AdBlock-XXXX`** with a captive portal: join it, pick your network,
-type the password, done.
+If the device cannot connect (or `secrets.h` still has placeholders), it starts an open AP
+**`S3-AdBlock-XXXX`** with a captive portal: join it, pick your network, type the password,
+done.
 
 To move it to another network later:
 
 - click **Forget WiFi** on the dashboard, or
-- **hold BOOT for 3 seconds while the device is running** (GPIO9 on C3, GPIO0 on
-  S3/classic). Holding BOOT at power-on just enters the ROM download mode, which is
-  why the old boot-time check never fired.
+- **hold BOOT (GPIO0) for 3 seconds while the device is running**.
 
-A configured device that cannot join reboots and retries every 3 minutes instead of
-sitting in the portal forever, and the firmware restarts itself if WiFi stays down for
-2 minutes.
+A configured device that cannot join reboots and retries every 3 minutes instead of sitting
+in the portal forever, and the firmware restarts itself if WiFi stays down for 2 minutes.
 
 ## Dashboard and HTTP API
 
-`http://c3adblock.local` (mDNS) — per-client block/allow counters, system info,
-pause, ban, custom domains, blocklist upload, remote auto-update, firmware OTA.
+`http://s3adblock.local` (mDNS) — per-client block/allow counters, system info, pause, ban,
+custom domains, blocklist upload, remote auto-update, firmware OTA.
 
-Read-only endpoints need no auth; everything that mutates state requires
-**HTTP Basic Auth** *and* the header `X-Requested-With: c3-adblock` (CSRF defence).
+Read-only endpoints need no auth; everything that mutates state requires **HTTP Basic Auth**
+*and* the header `X-Requested-With: s3-adblock` (CSRF defence).
 
 | endpoint | auth | purpose |
 |---|---|---|
@@ -242,9 +215,9 @@ Read-only endpoints need no auth; everything that mutates state requires
 | `POST /update` | yes | firmware OTA |
 | `GET /forgetwifi` | yes | wipe credentials, reboot into the portal |
 
-`/stats.json` reports `blocked`, `allowed`, `domains`, `psram`, `rssi`, `temp`,
-`heap`, `psramfree`, `uptime`, `blocking`, `resumeIn`, `dns` (resolver in use),
-`dnscfg` (pinned resolver), `defcreds`, `clients[]`, `custom[]`.
+`/stats.json` reports `blocked`, `allowed`, `domains`, `psram`, `rssi`, `temp`, `heap`,
+`psramfree`, `uptime`, `blocking`, `resumeIn`, `dns` (resolver in use), `dnscfg` (pinned
+resolver), `defcreds`, `clients[]`, `custom[]`.
 
 ### Upstream resolver
 
@@ -254,25 +227,23 @@ Allowed domains are forwarded to, in order:
 2. the DNS servers handed out by DHCP (normally your router),
 3. the built-in default `9.9.9.9`.
 
-If the active resolver goes silent, the device rotates to the next candidate after
-three timeouts. **This matters on networks that block public resolvers** (many
-carriers and corporate WiFis drop `9.9.9.9`/`1.1.1.1`): without rotation, blocking
-still works but every allowed lookup times out, which looks exactly like "the
-internet is broken".
+If the active resolver goes silent, the device rotates to the next candidate after three
+timeouts. **This matters on networks that block public resolvers** (many carriers and
+corporate WiFis drop `9.9.9.9`/`1.1.1.1`): without rotation, blocking still works but every
+allowed lookup times out, which looks exactly like "the internet is broken".
 
 ## Over-the-air updates
 
-- **Blocklist** — dashboard *Blocklist → Upload*, or set a URL under *Remote
-  auto-update* and the device pulls a prebuilt `blocklist.bin` on a schedule. While a
-  replacement downloads the live list keeps blocking (when flash has room for both);
-  truncated or failed downloads are rolled back, and a reboot mid-swap is repaired at
-  startup. DNS keeps being answered during the download.
-- **Firmware** — dashboard *Firmware → OTA update* with `.pio/build/s3/firmware.bin`,
-  or from the CLI:
+- **Blocklist** — dashboard *Blocklist → Upload*, or set a URL under *Remote auto-update* and
+  the device pulls a prebuilt `blocklist.bin` on a schedule. While a replacement downloads the
+  live list keeps blocking (when flash has room for both); truncated or failed downloads are
+  rolled back, and a reboot mid-swap is repaired at startup. DNS keeps being answered during
+  the download.
+- **Firmware** — dashboard *Firmware → OTA update* with `.pio/build/s3/firmware.bin`, or:
 
   ```bash
   export OTA_PASS='<OTA_PASS from secrets.h>'
-  pio run -e s3-ota -t upload --upload-port c3adblock.local
+  pio run -e s3-ota -t upload --upload-port s3adblock.local
   pio run -e s3-ota -t upload --upload-port 192.168.1.50   # or by IP
   ```
 
@@ -281,7 +252,8 @@ internet is broken".
 
 ## Performance
 
-Measured on ESP32-S3 (N16R8, 2.3M domains, flash path — the list exceeds 8 MB PSRAM):
+Measured on ESP32-S3 N16R8 with the 2.3M-domain list (flash path, since the list exceeds
+8 MB PSRAM):
 
 | case | latency |
 |---|---|
@@ -290,23 +262,21 @@ Measured on ESP32-S3 (N16R8, 2.3M domains, flash path — the list exceeds 8 MB 
 | forwarded to upstream | 40–110 ms |
 | firmware RAM use | 113 KB / 320 KB (34.6%) |
 
-With lists that fit in PSRAM (≤ ~1.5M domains, e.g. `light` or `balanced`) the table
-is mirrored at boot and lookups become in-RAM binary searches (microseconds).
+With a list that fits in PSRAM (`light`, `balanced`) the table is mirrored at boot and
+lookups become in-RAM binary searches.
 
 ## Security model
 
-- **Basic Auth** (`WEB_USER`/`WEB_PASS`) on every state-changing endpoint, and
-  **`OTA_PASS`** for ArduinoOTA.
-- **CSRF header** `X-Requested-With: c3-adblock`: browsers auto-replay cached Basic
-  Auth to any request against an authenticated origin, so auth alone would let any
-  web page drive the API through `<img src="http://c3adblock.local/forgetwifi">`.
+- **Basic Auth** (`WEB_USER`/`WEB_PASS`) on every state-changing endpoint, **`OTA_PASS`** for
+  ArduinoOTA.
+- **CSRF header** `X-Requested-With: s3-adblock`: browsers auto-replay cached Basic Auth to any
+  request against an authenticated origin, so auth alone would let any web page drive the API
+  through `<img src="http://s3adblock.local/forgetwifi">`.
 - **Stored-XSS**: custom domain names are HTML-escaped before rendering.
-- **Limits**: plain HTTP on :80. Basic Auth over HTTP is a LAN trust boundary, not
-  encryption — an on-path attacker can read credentials. The setup AP
-  (`C3-AdBlock-XXXX`) is open by design, so it can be joined before you have any
-  credentials.
-- **Placeholder passwords**: the firmware warns on serial and shows a dashboard banner
-  while `CHANGE_ME_*` values are still in use.
+- **Limits**: plain HTTP on :80. Basic Auth over HTTP is a LAN trust boundary, not encryption.
+  The setup AP (`S3-AdBlock-XXXX`) is open by design.
+- **Placeholder passwords**: the firmware warns on serial and shows a dashboard banner while
+  `CHANGE_ME_*` values are still in use.
 
 ## Troubleshooting
 
@@ -319,8 +289,9 @@ is mirrored at boot and lookups become in-RAM binary searches (microseconds).
 | dashboard loads but nothing is blocked | the client is not using the device as DNS yet |
 | blocked sites work, allowed sites time out | upstream resolver unreachable → set *Upstream DNS* on the dashboard |
 | espota `No response from device` | PC firewall/VLAN; use the dashboard firmware upload |
-| mDNS name does not resolve | use the IP from `pio device monitor` |
+| `s3adblock.local` does not resolve | use the IP from `pio device monitor` |
 | dashboard MAC column is empty | ARP not resolved yet; the firmware refreshes it automatically |
+| PSRAM mirror inactive (`"psram":false`) | the list is larger than free PSRAM; expected for `max` |
 
 **ModemManager** (default on Fedora/Ubuntu) grabs `/dev/ttyACM0` and toggles DTR/RTS,
 resetting the board:
@@ -334,42 +305,49 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 ## Repository layout
 
 ```
-platformio.ini               environments: s3 (default), s3-ota, c3, esp32dev
-partitions_s3_16mb.csv       16 MB S3:  2x1.6 MB app + 12.8 MB LittleFS
-partitions_s3.csv            8 MB S3:   2x1.6 MB app + 4.8 MB LittleFS
-partitions.csv               4 MB C3/ESP32: 2x1.6 MB app + 704 KB LittleFS
+platformio.ini               env s3 (default) and s3-ota (ArduinoOTA)
+partitions.csv               16 MB S3: 2x1.6 MB app + 12.8 MB LittleFS
 src/main.cpp                 firmware: DNS sinkhole, dashboard API, OTA, WiFi setup
 src/page.h                   dashboard HTML (PROGMEM)
 src/secrets.example.h        template for credentials (copy to secrets.h)
 tools/build_blocklist.py     list -> sorted 40-bit hash blob (--preset, --domains-out)
 data/                        LittleFS source directory (blocklist.bin goes here)
 docs/index.html              GitHub Pages landing page
-hardware/                    3D-printable C3 enclosure
-.github/workflows/build.yml  builds s3 / c3 / esp32dev
+.github/workflows/build.yml  builds s3
+.github/workflows/release.yml    tag -> firmware assets on a release
 .github/workflows/blocklist.yml  weekly blocklist release
 CHANGELOG.md                 changes in this fork vs upstream
 ```
 
-## What this fork changes
+## Attribution
 
-See [CHANGELOG.md](CHANGELOG.md) for details. Highlights:
+This project is a **modified version of
+[M-Abozaid/esp32-c3-adblock](https://github.com/M-Abozaid/esp32-c3-adblock)** — *"Pi-hole-class
+DNS ad-blocker on a $2 ESP32-C3 (no PSRAM): 537k domains as 40-bit FNV-1a hashes, flash binary
+search. UDP DNS sinkhole + web dashboard."* ([demo video](https://youtube.com/shorts/RaxszOUMi8E?feature=share)).
+That project in turn credits [s60sc/ESP32_AdBlocker](https://github.com/s60sc/ESP32_AdBlocker) for
+the "answer 0.0.0.0 for blocklisted domains" idea.
 
-- **ESP32-S3 port done properly**: 16 MB partition table, octal-PSRAM sdkconfig
-  (`qio_opi`), UART console, PSRAM mirror when the list fits, `s3-ota` env.
-- **Async DNS forwarding** — the original blocked up to 1 s per query, serializing all
-  clients and stalling the web UI.
-- **Upstream resolver selection + rotation** — a network that drops Quad9 no longer
-  breaks every allowed lookup.
-- **`max` preset: 2.3M domains** (8x the original default) including threat feeds.
-- **Crash-safe blocklist swap**, LRU client table, persistent ban list, chunked
-  `/stats.json`, 2-minute WiFi watchdog, BOOT-button recovery.
-- Fixed: bans lost on reboot, GBK-encoded partition tables that broke the build,
-  unreachable power-on BOOT check.
+**What this fork changes** (full detail in [CHANGELOG.md](CHANGELOG.md)):
 
-## Credits and license
+- **ESP32-S3 only.** Dropped the C3 and classic-ESP32 environments, partition tables and
+  enclosure. Targets N16R8 with a 16 MB partition table, octal-PSRAM sdkconfig (`qio_opi`),
+  UART console and an `s3-ota` environment.
+- **Async DNS forwarding.** The upstream loop blocked up to 1 s per lookup, serializing clients
+  and stalling the dashboard. Now up to 32 queries are in flight, matched on source address,
+  a private transaction id and a question hash.
+- **Upstream resolver selection and rotation.** Pinned → DHCP → built-in `9.9.9.9`, rotating
+  after three timeouts, because many networks drop public resolvers.
+- **2.3M-domain blocklist** (`max` preset, ~8x the upstream default) via a 12.5 MB filesystem,
+  plus a larger flash index (8192 buckets) so buckets cannot silently overflow.
+- **Reliability fixes**: crash-safe blocklist swap with rollback, bans persisting across
+  reboots, LRU client table, chunked `/stats.json`, WiFi watchdog, BOOT-button recovery.
+- Rewritten documentation, GitHub Pages landing page and CI (build matrix, release workflow).
 
-Original concept and implementation: [M-Abozaid/esp32-c3-adblock](https://github.com/M-Abozaid/esp32-c3-adblock),
-inspired by [s60sc/ESP32_AdBlocker](https://github.com/s60sc/ESP32_AdBlocker) — the
-"answer 0.0.0.0 for blocklisted domains" idea.
+Everything else — the hash-in-flash design, the dashboard, the captive portal, CSRF hardening —
+is upstream work. Please send credit upstream.
 
-MIT — see [LICENSE](LICENSE).
+## License
+
+MIT — see [LICENSE](LICENSE). Copyright belongs to the upstream authors and this fork's
+contributors.

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>esp32-s3-adblock — 2.3M domains, 12 MB of flash, no server</title>
-<meta name="description" content="A Pi-hole-style DNS ad-blocker for the ESP32-S3: 2.3 million blocked domains stored as sorted 40-bit hashes in flash.">
+<meta name="description" content="ESP32-S3 fork of esp32-c3-adblock: a Pi-hole-style DNS ad-blocker storing 2.3 million blocked domains as sorted 40-bit hashes in flash.">
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -13,7 +13,7 @@
   h1 { font-size: 32px; margin: 0 0 8px; letter-spacing: -0.5px; }
   h1 .g { color: #3fb950; }
   h2 { font-size: 19px; margin: 34px 0 10px; }
-  .sub { color: #8b949e; margin: 0 0 26px; font-size: 17px; }
+  .sub { color: #8b949e; margin: 0 0 22px; font-size: 17px; }
   .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px 22px; margin: 16px 0; }
   .stats { display: flex; flex-wrap: wrap; gap: 10px; margin: 22px 0; }
   .stat { flex: 1; min-width: 130px; background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 14px 16px; }
@@ -27,6 +27,7 @@
   .btn { display: inline-block; font: 600 16px system-ui; padding: 12px 22px; border-radius: 8px; background: #3fb950; color: #000; text-decoration: none; margin: 6px 8px 6px 0; }
   .btn.alt { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
   .note { color: #8b949e; font-size: 14px; }
+  .attr { border-left: 3px solid #3fb950; padding-left: 14px; }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #21262d; }
   th { color: #8b949e; font-weight: 600; }
@@ -35,7 +36,7 @@
 <body>
 <div class="wrap">
   <h1>🛡️ <span class="g">esp32-s3-adblock</span></h1>
-  <p class="sub">A Pi-hole-style DNS ad-blocker that runs on an ESP32-S3 and blocks
+  <p class="sub">A Pi-hole-style DNS ad-blocker for the <b>ESP32-S3</b> that blocks
     <b>2.3 million domains</b> from 11.5 MB of flash — no server, no SD card, no domain
     strings in RAM.</p>
 
@@ -45,6 +46,13 @@
     <div class="stat"><b>~10 ms</b><span>per blocked lookup</span></div>
     <div class="stat"><b>113 KB</b><span>firmware RAM</span></div>
   </div>
+
+  <p class="note attr">Based on
+    <a href="https://github.com/M-Abozaid/esp32-c3-adblock">M-Abozaid/esp32-c3-adblock</a> —
+    "Pi-hole-class DNS ad-blocker on a $2 ESP32-C3 (no PSRAM): 537k domains as 40-bit FNV-1a
+    hashes, flash binary search." This fork is ESP32-S3 only and grows the list to 2.3M.
+    <a href="https://youtube.com/shorts/RaxszOUMi8E?feature=share">Upstream demo</a>.
+  </p>
 
   <div class="card">
     <h2 style="margin-top:0">How it works</h2>
@@ -56,20 +64,22 @@
          ──▶ binary search the sorted hash table
               ├─ hit  ──▶ 0.0.0.0        (sinkholed)
               └─ miss ──▶ upstream (async), relay reply</code></pre>
-    <p class="note">On lists that fit in PSRAM (up to ~1.5M domains) the table is mirrored
-      into PSRAM at boot, turning lookups into in-RAM binary searches.</p>
+    <p class="note">Lists up to ~1.5M domains are mirrored into PSRAM at boot, turning lookups
+      into in-RAM binary searches. The 2.3M preset exceeds 8 MB of PSRAM and uses the flash
+      index instead.</p>
   </div>
 
   <div class="card">
     <h2 style="margin-top:0">Flash it</h2>
     <ol>
-      <li>Grab <code>firmware.bin</code> and <code>littlefs.bin</code> from the
+      <li>Grab <code>esp32s3-n16r8-firmware.bin</code>, <code>s3-bootloader.bin</code>,
+        <code>s3-partitions.bin</code> and <code>boot_app0.bin</code> from the
         <a href="https://github.com/wweng8o/esp32-s3-adblock/releases">releases page</a>.</li>
-      <li>Flash both with <code>esptool</code> or PlatformIO (see the README for exact
-        offsets).</li>
-      <li>Join the <code>C3-AdBlock-XXXX</code> access point, pick your WiFi, done.</li>
+      <li>Flash them at <code>0x0</code>, <code>0x8000</code>, <code>0xe000</code> and
+        <code>0x10000</code>.</li>
+      <li>Join the <code>S3-AdBlock-XXXX</code> access point, pick your WiFi, done.</li>
       <li>Point your router's DNS at the board and open
-        <code>http://c3adblock.local</code>.</li>
+        <code>http://s3adblock.local</code>.</li>
     </ol>
     <p style="margin-bottom:0">
       <a class="btn" href="https://github.com/wweng8o/esp32-s3-adblock">Source on GitHub</a>
@@ -78,20 +88,21 @@
   </div>
 
   <div class="card">
-    <h2 style="margin-top:0">Board support</h2>
+    <h2 style="margin-top:0">Hardware</h2>
     <table>
-      <tr><th>Board</th><th>Flash</th><th>PSRAM</th><th>Capacity</th></tr>
-      <tr><td>ESP32-S3 N16R8 <em>(default)</em></td><td>16 MB</td><td>8 MB octal</td><td>~2.6M domains</td></tr>
-      <tr><td>ESP32-S3 N8R8</td><td>8 MB</td><td>8 MB octal</td><td>~1M domains</td></tr>
-      <tr><td>ESP32-C3 SuperMini</td><td>4 MB</td><td>none</td><td>~250k domains</td></tr>
-      <tr><td>Classic ESP32</td><td>4 MB</td><td>none</td><td>~250k domains</td></tr>
+      <tr><th>Requirement</th><th>Value</th></tr>
+      <tr><td>Board</td><td>ESP32-S3 <b>N16R8</b> only</td></tr>
+      <tr><td>Flash</td><td>16 MB (12.5 MB blocklist filesystem)</td></tr>
+      <tr><td>PSRAM</td><td>8 MB octal — mirrors lists up to ~1.5M domains</td></tr>
+      <tr><td>Capacity</td><td>~2.6M domains</td></tr>
     </table>
   </div>
 
-  <p class="note">MIT licensed. Based on
+  <p class="note">MIT licensed. This project is a modified version of
     <a href="https://github.com/M-Abozaid/esp32-c3-adblock">M-Abozaid/esp32-c3-adblock</a>,
-    which in turn credits <a href="https://github.com/s60sc/ESP32_AdBlocker">s60sc/ESP32_AdBlocker</a>
-    for the "answer 0.0.0.0" idea.</p>
+    which credits <a href="https://github.com/s60sc/ESP32_AdBlocker">s60sc/ESP32_AdBlocker</a>
+    for the "answer 0.0.0.0" idea. Full changelog in
+    <a href="https://github.com/wweng8o/esp32-s3-adblock/blob/main/CHANGELOG.md">CHANGELOG.md</a>.</p>
 </div>
 </body>
 </html>
