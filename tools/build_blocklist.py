@@ -13,8 +13,8 @@ Usage: build_blocklist.py [out.bin] [--preset NAME] [--domains-out list.txt] [sr
   (the .bin itself only contains 40-bit hashes and cannot be reversed).
 
 Presets (size -> which board layout):
-  light     ~100k  ads/trackers/malware, social + messaging keep working
-                   4 MB C3 / 8 MB S3 with firmware OTA
+  light     ~115k  ads/trackers/malware, social + messaging keep working
+                   4 MB C3 (704 KB FS) / any S3
   balanced  ~360k  + social/porn/gambling + OISD big
                    8 MB S3 (1.8 MB blob), still mirrored into PSRAM
   max       ~2.3M  + Hagezi Threat Intelligence Feeds (malware/phishing/scam)
@@ -36,12 +36,20 @@ FNV_PRIME  = 0x100000001b3
 U64 = (1 << 64) - 1
 
 # Daily driver that FITS alongside dual-OTA firmware slots on a 4 MB C3
-# (~250k domain budget); the 8 MB S3 has room for ~1M. Ads + trackers + malware,
+# (~140k domain budget); the 8 MB S3 has room for ~1M. Ads + trackers + malware,
 # WhatsApp/social keep working. ~100k entries / 0.5 MB
 # (Hagezi's wildcard lists drop subdomains the firmware's parent-matching already covers).
 # Want more? pro-onlydomains.txt is ~370k: it fits the 8 MB S3 with dual-OTA,
 # but on a 4 MB C3 it only fits the single-app (no-OTA) partition table.
 RAW = 'https://raw.githubusercontent.com/'
+
+# Networks that cannot reach raw.githubusercontent.com (many in mainland China)
+# can prefix the preset URLs with a GitHub mirror, e.g.
+#   GITHUB_MIRROR=https://ghproxy.net/ python3 tools/build_blocklist.py ...
+# An explicit list of sources ignores this and is used verbatim.
+MIRROR = os.environ.get('GITHUB_MIRROR', '').strip()
+if MIRROR and not MIRROR.endswith('/'):
+    MIRROR += '/'
 PRESETS = {
     'light': [
         RAW + 'StevenBlack/hosts/master/hosts',                                      # base: ads + malware
@@ -104,7 +112,10 @@ def main():
     if preset is not None and preset not in PRESETS:
         print(f'unknown preset "{preset}" (choose: {", ".join(PRESETS)})', file=sys.stderr); sys.exit(2)
     out = argv[0] if argv else 'blocklist.bin'
-    sources = argv[1:] if len(argv) > 1 else PRESETS[preset or 'light']
+    if len(argv) > 1:
+        sources = argv[1:]
+    else:
+        sources = [MIRROR + u if MIRROR else u for u in PRESETS[preset or 'light']]
 
     domains, allow = set(), set()
     skipped = 0

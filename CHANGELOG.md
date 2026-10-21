@@ -22,6 +22,8 @@ ESP32-S3 port, 8x larger blocklist, and a reworked DNS data path.
 - **`env:s3-ota`** for flashing over WiFi with ArduinoOTA/espota and `OTA_PASS`.
 - **`--preset light|balanced|max`** in `tools/build_blocklist.py`.
   `max` reaches **2,298,291 domains / 11.49 MB**, adding Hagezi Threat Intelligence Feeds.
+- **`GITHUB_MIRROR`** environment variable so preset downloads work on networks that block
+  `raw.githubusercontent.com`.
 - **`--domains-out`** writes the normalized plain-text domain list alongside the hash blob
   (the `.bin` cannot be reversed).
 - **Upstream resolver selection**: pinned resolver (`/setdns`, persisted in `/dns.cfg`) →

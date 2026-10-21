@@ -63,8 +63,8 @@ Because only hashes are stored, the list is not readable on the device. Use
 | **ESP32-S3 N16R8** (default) | 16 MB | 8 MB octal | `s3` | **~2.6M domains** (12.8 MB FS) |
 | ESP32-S3 N8R8 | 8 MB | 8 MB octal | `s3` + edit | ~1M domains (4.8 MB FS) |
 | ESP32-S3 N8R2 | 8 MB | 2 MB quad | `s3` + edit | ~1M domains, mirror capped by PSRAM |
-| ESP32-C3 / SuperMini | 4 MB | none | `c3` | ~250k domains (1.3 MB FS) |
-| Classic ESP32 DevKit | 4 MB | none | `esp32dev` | ~250k domains |
+| ESP32-C3 / SuperMini | 4 MB | none | `c3` | ~140k domains (704 KB FS) |
+| Classic ESP32 DevKit | 4 MB | none | `esp32dev` | ~140k domains |
 
 Switching the S3 module (**N8R8 / N8R2**) is two lines in
 [`platformio.ini`](platformio.ini):
@@ -179,6 +179,14 @@ A blocked domain also blocks its subdomains. Rules a DNS hash list cannot expres
 python3 tools/build_blocklist.py data/blocklist.bin --preset max --domains-out blocklist.txt
 python3 tools/build_blocklist.py data/blocklist.bin --preset light
 python3 tools/build_blocklist.py out.bin mylist.txt https://example.com/hosts
+```
+
+If your network cannot reach `raw.githubusercontent.com` (common in mainland China), route the
+preset downloads through a GitHub mirror — explicit source lists are used verbatim and are
+not rewritten:
+
+```bash
+GITHUB_MIRROR=https://ghproxy.net/ python3 tools/build_blocklist.py data/blocklist.bin --preset max
 ```
 
 Measured composition of the `max` preset used here:
@@ -329,7 +337,7 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 platformio.ini               environments: s3 (default), s3-ota, c3, esp32dev
 partitions_s3_16mb.csv       16 MB S3:  2x1.6 MB app + 12.8 MB LittleFS
 partitions_s3.csv            8 MB S3:   2x1.6 MB app + 4.8 MB LittleFS
-partitions.csv               4 MB C3/ESP32: 2x1.3 MB app + 1.3 MB LittleFS
+partitions.csv               4 MB C3/ESP32: 2x1.6 MB app + 704 KB LittleFS
 src/main.cpp                 firmware: DNS sinkhole, dashboard API, OTA, WiFi setup
 src/page.h                   dashboard HTML (PROGMEM)
 src/secrets.example.h        template for credentials (copy to secrets.h)
