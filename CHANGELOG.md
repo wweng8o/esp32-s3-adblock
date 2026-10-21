@@ -27,8 +27,9 @@ board, one partition table and one build flow.
   Existing bookmarks to `c3adblock.local` stop working after reflashing.
 - Default blocklist preset is now `max` (~2.3M domains), matching the 12.5 MB filesystem.
   The weekly release workflow checks for a 9–12 MB blob.
-- README, Japanese README and the GitHub Pages landing page rewritten for the S3-only scope,
-  with an explicit attribution section.
+- README and the GitHub Pages landing page rewritten for the S3-only scope, with an explicit
+  attribution section. The Japanese README was dropped; a Simplified Chinese README
+  (`README_ZH.md`) was added instead.
 
 ## [2.0.0] - 2026-10-21
 
