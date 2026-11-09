@@ -72,11 +72,14 @@
   <div class="card">
     <h2 style="margin-top:0">Flash it</h2>
     <ol>
-      <li>Grab <code>esp32s3-n16r8-firmware.bin</code>, <code>s3-bootloader.bin</code>,
-        <code>s3-partitions.bin</code> and <code>boot_app0.bin</code> from the
+      <li>Grab <code>s3-bootloader.bin</code>, <code>s3-partitions.bin</code>,
+        <code>boot_app0.bin</code>, <code>esp32s3-firmware.bin</code> and (optionally)
+        <code>s3-littlefs.bin</code> from the
         <a href="https://github.com/wweng8o/esp32-s3-adblock/releases">releases page</a>.</li>
-      <li>Flash them at <code>0x0</code>, <code>0x8000</code>, <code>0xe000</code> and
-        <code>0x10000</code>.</li>
+      <li>Flash them with Espressif <b>Flash Download Tool 3.9.7</b> (ChipType ESP32-S3,
+        DIO, 80 MHz, DoNotChgBin ✔) at <code>0x0</code>, <code>0x8000</code>,
+        <code>0xe000</code>, <code>0x10000</code> and <code>0x330000</code>.
+        Step-by-step instructions are in the README.</li>
       <li>Join the <code>S3-AdBlock-XXXX</code> access point, pick your WiFi, done.</li>
       <li>Point your router's DNS at the board and open
         <code>http://s3adblock.local</code>.</li>
