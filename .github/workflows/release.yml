@@ -1,6 +1,11 @@
 name: release
 
-# Push a tag like v2.0.0 and the ESP32-S3 firmware images are attached to it.
+# Push a tag like v3.0.0 and the ESP32-S3 images are attached to it:
+#   s3-bootloader.bin     0x0
+#   s3-partitions.bin     0x8000
+#   boot_app0.bin         0xe000
+#   esp32s3-firmware.bin  0x10000
+#   s3-littlefs.bin       0x330000   (filesystem preloaded with the weekly blocklist)
 # Blocklists are published separately by blocklist.yml.
 on:
   push:
@@ -26,15 +31,32 @@ jobs:
       - name: Placeholder secrets (real ones are gitignored)
         run: cp src/secrets.example.h src/secrets.h
       - run: pio run -e s3
+
+      # A prebuilt filesystem makes the board usable without PlatformIO: drop the
+      # weekly blocklist into data/ and let buildfs wrap it into a flashable image.
+      - name: Fetch the current blocklist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release download blocklist --pattern blocklist.bin --dir data --clobber || echo "no blocklist release yet"
+      - name: Build the filesystem image
+        run: pio run -e s3 -t buildfs
+
       - name: Collect artifacts
         run: |
           mkdir -p out
           B=".pio/build/s3"
-          cp "$B/firmware.bin"   "out/esp32s3-n16r8-firmware.bin"
-          cp "$B/bootloader.bin" "out/s3-bootloader.bin"
-          cp "$B/partitions.bin" "out/s3-partitions.bin"
+          cp "$B/bootloader.bin"   "out/s3-bootloader.bin"
+          cp "$B/partitions.bin"   "out/s3-partitions.bin"
+          cp "$B/firmware.bin"     "out/esp32s3-firmware.bin"
           cp "$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin" \
              "out/boot_app0.bin"
+          if [ -f "$B/littlefs.bin" ] && [ -f data/blocklist.bin ]; then
+            cp "$B/littlefs.bin" "out/s3-littlefs.bin"
+          else
+            echo "no blocklist in data/ -> skipping s3-littlefs.bin"
+          fi
+          ls -l out
       - uses: actions/upload-artifact@v4
         with:
           name: s3
@@ -49,7 +71,7 @@ jobs:
         with:
           path: out
           merge-multiple: true
-      - name: Attach firmware to the release
+      - name: Attach images to the release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}   # no checkout in this job: tell gh the repo

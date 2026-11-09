@@ -28,6 +28,7 @@ DNS 查询 ──▶ 提取域名 ──▶ FNV-1a 哈希（含各级父域）
 - [工作原理](#工作原理)
 - [硬件要求](#硬件要求)
 - [快速开始](#快速开始)
+- [Flash Download Tool 烧录步骤](#使用-flash-download-tool-397-烧录步骤)
 - [黑名单与预设](#黑名单与预设)
 - [WiFi 配网](#wifi-配网)
 - [仪表盘与 HTTP API](#仪表盘与-http-api)
@@ -110,23 +111,121 @@ pio device monitor         # -> http://s3adblock.local
 
 ### 预编译固件
 
-推送 `v*` 标签后，CI 会把 `esp32s3-n16r8-firmware.bin`、`s3-bootloader.bin`、
-`s3-partitions.bin`、`boot_app0.bin` 附加到
-[Releases](https://github.com/wweng8o/esp32-s3-adblock/releases)。每周也会发布一份
-`blocklist.bin`。
+每次推送 `v*` 标签，CI 都会生成一个**只包含 ESP32-S3 镜像**的 Release：
 
-不用 PlatformIO 时的烧录方式：
+| 文件 | 烧录地址 | 作用 | 是否必需 |
+|---|---|---|---|
+| `s3-bootloader.bin` | `0x0` | 二级引导程序 | 必需 |
+| `s3-partitions.bin` | `0x8000` | 分区表（2×1.6 MB 应用 + 12.8 MB 数据） | 必需 |
+| `boot_app0.bin` | `0xe000` | OTA 选择标志，保证首次启动进入 `app0` | 必需 |
+| `esp32s3-firmware.bin` | `0x10000` | 主程序 | 必需 |
+| `s3-littlefs.bin` | `0x330000` | 12.8 MB 文件系统，已预置每周发布的黑名单 | 可选 |
 
-```bash
-esptool.py --chip esp32s3 -p COM11 -b 460800 write_flash \
-  0x0     s3-bootloader.bin \
-  0x8000  s3-partitions.bin \
-  0xe000  boot_app0.bin \
-  0x10000 esp32s3-n16r8-firmware.bin
-```
+GitHub 自动附带的 `Source code (zip)` / `Source code (tar.gz)` 即完整源码。
 
-刚烧完的固件里没有黑名单：用 `pio run -t uploadfs` 写入 `data/blocklist.bin`，
-或在仪表盘上传，或把 *Remote auto-update* 指向每周发布的 release 资源。
+### 使用 Flash Download Tool 3.9.7 烧录步骤
+
+这是不需要任何开发环境的烧录方式：下载 5 个文件、点几下、烧完即可。Windows 上开箱可用，
+无需 PlatformIO 或 Python。
+
+**第 1 步：准备工具和驱动**
+
+1. 打开乐鑫
+   [下载页](https://www.espressif.com/en/support/download/other-tools)，
+   下载 **Flash Download Tools**，解压 `flash_download_tool_3.9.7_0.zip`。
+2. **解压路径必须是纯英文**（例如 `C:\flash_dl_tool\`）。路径含中文时，工具内置的
+   打包程序会报错或直接闪退。
+3. 安装串口驱动：CH340 或 CP210x（按你的板子选）。装好后在「设备管理器 → 端口(COM 和 LPT)」
+   里应能看到 `USB-SERIAL CH340 (COMx)` 之类的正常端口，而不是黄色感叹号。
+
+**第 2 步：下载镜像文件**
+
+到 [Releases](https://github.com/wweng8o/esp32-s3-adblock/releases) 下载上表中的 5 个文件，
+放到同一个**纯英文路径**的文件夹（例如 `C:\s3-fw\`）。
+
+**第 3 步：打开工具**
+
+双击 `flash_download_tool_3.9.7.exe`，在第一个对话框中选择：
+
+| 选项 | 取值 |
+|---|---|
+| ChipType | **ESP32-S3** |
+| WorkMode | **Develop** |
+| LoadMode | **UART** |
+
+点击 **OK** 进入主界面。
+
+**第 4 步：添加 5 行镜像**
+
+主界面右侧有多行路径框。**先在地址框输入偏移量并按回车**，再点该行最右侧的 `…` 选择文件，
+选择成功后行首会出现绿色勾选标记。按下面顺序逐行填好：
+
+| 行号 | 文件 | 烧录地址 | 勾选 |
+|---|---|---|---|
+| 1 | `s3-bootloader.bin` | `0x00000000` | ✔ |
+| 2 | `s3-partitions.bin` | `0x00008000` | ✔ |
+| 3 | `boot_app0.bin` | `0x0000e000` | ✔ |
+| 4 | `esp32s3-firmware.bin` | `0x00010000` | ✔ |
+| 5 | `s3-littlefs.bin` | `0x00330000` | ✔（若打算之后从仪表盘上传黑名单，此行可留空） |
+
+> 地址框支持 `0x0` / `0x8000` 这种简写，填完务必按回车确认，否则该行不会被勾选。
+
+**第 5 步：设置烧录参数**（主界面右下角）
+
+| 参数 | 取值 | 说明 |
+|---|---|---|
+| SPI SPEED | **80MHz** | 与固件编译参数一致 |
+| SPI MODE | **DIO** | 固件按 DIO 构建；选 QIO 可能无法启动 |
+| DoNotChgBin | **勾选** | 保留编译时写入的 16 MB Flash 头信息，避免容量识别错误 |
+| FLASH SIZE | 选 **16MB**（或保持 Detected） | 你的模块是 N16R8 |
+| BAUD | **921600** | 若传输不稳定，逐级降到 460800 或 115200 |
+| COM | 你的 `COMx` | 与设备管理器中一致 |
+
+**第 6 步：让芯片进入下载模式**
+
+多数 S3 开发板会自动复位进入下载模式，直接点 **START** 即可。
+若提示 `Failed to connect to ESP32-S3`（无法连接），手动进入：
+
+1. **按住 BOOT**（GPIO0）不放；
+2. 点一下 **RST** / **EN** 键后松开；
+3. 再松开 **BOOT**。
+
+此时芯片已进入 ROM 下载模式，再点一次 **START**。
+
+**第 7 步：开始烧录**
+
+点击 **START**。工具会逐行显示进度条和百分比，全部完成后底部输出 `FINISH`。
+随后按一下 **RST**（或重新插拔 USB）重启板子。
+
+**第 8 步：首次开机配网**
+
+板子会开启开放热点 **`S3-AdBlock-XXXX`**。用手机连接该热点，页面会自动弹出
+（没弹出就手动打开 `http://192.168.4.1`），选择家里的 WiFi 并输入密码。
+设备重启后加入你的网络，仪表盘地址为 **http://s3adblock.local**（或路由器里看到的 IP）。
+把这个 IP 设为设备的 DNS，拦截即刻生效。
+
+**注意事项**
+
+- 烧录时间：固件约 1 MB，几十秒；`s3-littlefs.bin` 有 12.8 MB，921600 波特率下需要几分钟，
+  属于正常现象。
+- **以后升级不需要再用这个工具**：仪表盘 *Firmware → OTA update* 可直接上传
+  `esp32s3-firmware.bin`，*Blocklist → Upload* 可上传 `blocklist.bin`。
+- 只重刷 `0x10000` 的 `esp32s3-firmware.bin` 会**保留**黑名单、自定义域名和 WiFi 设置。
+- 重刷 `0x330000` 的 `s3-littlefs.bin` 会**清空**自定义域名、封禁列表、固定的上游 DNS 和
+  自动更新配置（WiFi 凭据存在 NVS `0x9000`，不受影响）。
+- 命令行等效操作：
+
+  ```bash
+  esptool.py --chip esp32s3 -p COM11 -b 460800 write_flash \
+    0x0      s3-bootloader.bin \
+    0x8000   s3-partitions.bin \
+    0xe000   boot_app0.bin \
+    0x10000  esp32s3-firmware.bin \
+    0x330000 s3-littlefs.bin
+  ```
+
+- 每周黑名单 Release 里那个 `blocklist.bin` 是**纯哈希数据**，不是文件系统镜像，
+  **不要**直接烧到 `0x330000`。它只能通过仪表盘上传，或用 `pio run -t buildfs` 重新打包。
 
 ## 黑名单与预设
 

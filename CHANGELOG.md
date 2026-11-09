@@ -13,6 +13,14 @@ All changes below are relative to that upstream project. Format loosely follows
 S3-only scope: the C3 and classic-ESP32 targets are gone, so the repository contains one
 board, one partition table and one build flow.
 
+### Added
+
+- Release assets are ESP32-S3 only: `s3-bootloader.bin`, `s3-partitions.bin`, `boot_app0.bin`,
+  `esp32s3-firmware.bin`, plus an optional `s3-littlefs.bin` filesystem preloaded with the
+  current weekly blocklist. The old C3 / classic-ESP32 images are no longer published.
+- **Flash Download Tool 3.9.7 guide** in both READMEs: tool/driver setup, per-file offsets,
+  SPI mode/speed, download-mode sequence, first-boot setup and what a filesystem reflash wipes.
+
 ### Removed
 
 - `env:c3` and `env:esp32dev`, `partitions.csv` (4 MB), `partitions_s3.csv` (8 MB) and

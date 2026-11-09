@@ -29,6 +29,7 @@ query in ──▶ extract domain ──▶ FNV-1a hash (+ parent suffixes)
 - [How it works](#how-it-works)
 - [Hardware](#hardware)
 - [Quick start](#quick-start)
+- [Flash Download Tool 3.9.7](#flashing-with-espressif-flash-download-tool-397)
 - [Blocklists and presets](#blocklists-and-presets)
 - [WiFi setup](#wifi-setup)
 - [Dashboard and HTTP API](#dashboard-and-http-api)
@@ -113,22 +114,118 @@ After the first flash, **firmware and blocklist both update over WiFi** — no U
 
 ### Prebuilt releases
 
-Pushing a `v*` tag makes CI attach `esp32s3-n16r8-firmware.bin`, `s3-bootloader.bin`,
-`s3-partitions.bin` and `boot_app0.bin` to [Releases](https://github.com/wweng8o/esp32-s3-adblock/releases).
-A weekly `blocklist.bin` is published there too.
+Every `v*` tag produces a release containing **only the ESP32-S3 images**:
 
-Flashing without PlatformIO:
+| File | Flash offset | Purpose | Required |
+|---|---|---|---|
+| `s3-bootloader.bin` | `0x0` | second-stage bootloader | yes |
+| `s3-partitions.bin` | `0x8000` | partition table (2×1.6 MB app + 12.8 MB data) | yes |
+| `boot_app0.bin` | `0xe000` | OTA selector, so the first boot picks `app0` | yes |
+| `esp32s3-firmware.bin` | `0x10000` | the application | yes |
+| `s3-littlefs.bin` | `0x330000` | 12.8 MB filesystem preloaded with the weekly blocklist | optional |
 
-```bash
-esptool.py --chip esp32s3 -p COM11 -b 460800 write_flash \
-  0x0     s3-bootloader.bin \
-  0x8000  s3-partitions.bin \
-  0xe000  boot_app0.bin \
-  0x10000 esp32s3-n16r8-firmware.bin
-```
+The two auto-generated archives (`Source code (zip)` / `(tar.gz)`) contain the firmware source.
 
-A fresh flash has no blocklist yet: add `data/blocklist.bin` with `pio run -t uploadfs`,
-upload it from the dashboard, or point *Remote auto-update* at the weekly release asset.
+### Flashing with Espressif Flash Download Tool 3.9.7
+
+This is the no-toolchain route: download five files, flash them, done. It works on Windows
+and needs no PlatformIO or Python.
+
+**1. Get the tool and a driver**
+
+- Download **Flash Download Tools** from Espressif's
+  [download page](https://www.espressif.com/en/support/download/other-tools) and unzip
+  `flash_download_tool_3.9.7_0.zip`. Keep the folder at an **ASCII-only path** (e.g.
+  `C:\flash_dl_tool\`) — Chinese characters in the path break the bundler.
+- Install the USB-serial driver for your board: **CH340** or **CP210x**. In Device Manager
+  the port must show up as a normal `COMx` device, not as an unknown device.
+
+**2. Download the images**
+
+From [Releases](https://github.com/wweng8o/esp32-s3-adblock/releases) grab the five files
+listed in the table above into one folder (also ASCII-only, e.g. `C:\s3-fw\`).
+
+**3. Start the tool**
+
+Run `flash_download_tool_3.9.7.exe` and set the first dialog:
+
+| Field | Value |
+|---|---|
+| ChipType | **ESP32-S3** |
+| WorkMode | **Develop** |
+| LoadMode | **UART** |
+
+Click **OK**.
+
+**4. Add the five rows**
+
+In the main window, fill one row per file. Type the offset in the text box, press
+**Enter**, then click the `…` button and select the matching file so the green check mark
+appears:
+
+| Row | Path | Offset | Checked |
+|---|---|---|---|
+| 1 | `s3-bootloader.bin` | `0x0` | ✔ |
+| 2 | `s3-partitions.bin` | `0x8000` | ✔ |
+| 3 | `boot_app0.bin` | `0xe000` | ✔ |
+| 4 | `esp32s3-firmware.bin` | `0x10000` | ✔ |
+| 5 | `s3-littlefs.bin` | `0x330000` | ✔ (leave empty if you plan to upload a blocklist from the dashboard instead) |
+
+**5. Set the flash options**
+
+| Option | Value | Why |
+|---|---|---|
+| SPI SPEED | **80MHz** | matches the firmware build |
+| SPI MODE | **DIO** | the image is built for DIO; QIO can fail to boot |
+| DoNotChgBin | **✔ checked** | keeps the 16 MB flash header written by the build |
+| FLASH SIZE / BAUD | detected / **921600** | drop to 460800 or 115200 if the transfer is unstable |
+| COM | your `COMx` | from Device Manager |
+
+**6. Put the board in download mode**
+
+Most S3 dev boards auto-reset into download mode. If `START` fails with
+`Failed to connect to ESP32-S3`, do it manually:
+
+1. Press and **hold BOOT** (GPIO0).
+2. Tap **RST** / **EN** once and release it.
+3. Release **BOOT**. The chip is now in the ROM downloader; press **START** again.
+
+**7. Flash**
+
+Click **START**. Progress is shown per row plus an overall bar; the tool prints
+`FINISH` when done. Then press **RST** (or replug USB) — the board boots into the access
+point **`S3-AdBlock-XXXX`**.
+
+**8. First boot**
+
+Join that access point from a phone, pick your WiFi and enter the password. The device
+reboots, joins your network and serves the dashboard at **http://s3adblock.local**
+(or its IP from the router). Point your DNS at that IP and blocking starts.
+
+**Good to know**
+
+- The `esp32s3-firmware.bin` built here is ~1 MB, so the FTDI-style slow transfer is fine;
+  the 12.8 MB `s3-littlefs.bin` takes a few minutes at 921600 baud.
+- Updating later does **not** need this tool: the dashboard's *Firmware → OTA update* takes
+  `esp32s3-firmware.bin`, and *Blocklist → Upload* takes a `blocklist.bin`.
+- Reflashing only `esp32s3-firmware.bin` at `0x10000` keeps your blocklist, custom domains
+  and WiFi settings. Reflashing `s3-littlefs.bin` at `0x330000` **wipes** custom domains,
+  the ban list, the pinned resolver and the auto-update schedule (WiFi credentials live in
+  NVS at `0x9000` and survive).
+- To do the same from a shell instead of the GUI:
+
+  ```bash
+  esptool.py --chip esp32s3 -p COM11 -b 460800 write_flash \
+    0x0      s3-bootloader.bin \
+    0x8000   s3-partitions.bin \
+    0xe000   boot_app0.bin \
+    0x10000  esp32s3-firmware.bin \
+    0x330000 s3-littlefs.bin
+  ```
+
+- The weekly blocklist release publishes a bare `blocklist.bin` (hash blob, **not** a
+  filesystem image). Do not flash that at `0x330000`; upload it through the dashboard or
+  rebuild the filesystem with `pio run -t buildfs`.
 
 ## Blocklists and presets
 
